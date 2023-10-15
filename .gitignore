@@ -1,12 +1,12 @@
 # CMake build directories in the root and subdirectories
-/build/
-/CMakeFiles/
-/CMakeCache.txt
-/CMakeScripts/
-/CMakeScripts/CMakeOutput.log
-/CMakeScripts/CMakeError.log
-/CMakeScripts/cmake_install.cmake
-/CMakeScripts/CMakeTmp/
+**/build/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/CMakeScripts/
+**/CMakeScripts/CMakeOutput.log
+**/CMakeScripts/CMakeError.log
+**/CMakeScripts/cmake_install.cmake
+**/CMakeScripts/CMakeTmp/
 
 # Compiled CUDA files
 *.ptx

@@ -5,6 +5,7 @@
 
 #include <cuda_profiler_api.h>
 
+#include <iostream>
 
 template <typename T>
 __global__
@@ -40,15 +41,14 @@ void kernel_your_reduce(const T* __restrict__ buffer, T* __restrict__ total, int
     extern __shared__ int sdata[];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    sdata[tid] = buffer[i];
+    unsigned int i = blockIdx.x * blockDim.x * 2 + threadIdx.x;
+
+    sdata[tid] = buffer[i]+ buffer[i + blockDim.x];
     __syncthreads();
 
-    for (int s = 1; s < size; s *= 2) {
-        int index = 2 * s * tid;
-        if (index < size)
-            sdata[index] += sdata[index + s];
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s)
+            sdata[tid] += sdata[tid + s];
         __syncthreads();
     }
 
@@ -61,11 +61,17 @@ void your_reduce(cuda_tools::host_shared_ptr<int> buffer,
 {
     cudaProfilerStart();
 
-    // TODO
-    // Si le nombre de threads est trop faible on va generer un grand nombre de blocs et le
-    // deuxieme appel au kernel ne va pas traiter toutes les valeurs car pas assez de threads dans un bloc
+    /*
+     * Si le nombre de threads est trop faible on va generer un grand nombre de blocs et le
+     * deuxieme appel au kernel ne va pas traiter toutes les valeurs car pas assez de threads dans un bloc
+     */ 
     const int blockSize = 1024;
-    const int gridSize = (buffer.size_ + blockSize - 1) / blockSize;
+    /* 
+     * On divise le nombre de blocs par 2 parce que chaque thread est desormais charge de load 2 valeurs, 
+     * ceci a ete fait parce que au bout d'une iteration la moitie des threads etait inutilisee donc autant 
+     * augmenter le work per thread
+     */
+    const int gridSize = (buffer.size_ + blockSize - 1) / (blockSize * 2); 
 
     int *tmp;
     cudaMalloc(&tmp, gridSize * sizeof(int));
