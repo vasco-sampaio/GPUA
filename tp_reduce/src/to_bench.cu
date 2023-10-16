@@ -33,24 +33,68 @@ void baseline_reduce(cuda_tools::host_shared_ptr<int> buffer,
     cudaProfilerStop();
 }
 
-template <typename T>
+template <int BLOCK_SIZE>
+__device__
+void warpReduce(int* sdata, int tid) {
+    /*
+     * Volatile ensures that there is not reordering between each
+     * reduce step, but it's legacy.
+     * __syncwarp is more modern
+     */
+
+    if (BLOCK_SIZE >= 64) {
+        sdata[tid] += sdata[tid + 32]; __syncwarp();
+    }
+    if (BLOCK_SIZE >= 32) {
+        sdata[tid] += sdata[tid + 16]; __syncwarp();
+    }
+    if (BLOCK_SIZE >= 16) {
+        sdata[tid] += sdata[tid + 8]; __syncwarp();
+    }
+    if (BLOCK_SIZE >= 8) {
+        sdata[tid] += sdata[tid + 4]; __syncwarp();
+    }
+    if (BLOCK_SIZE >= 4) {
+        sdata[tid] += sdata[tid + 2]; __syncwarp();
+    }
+    if (BLOCK_SIZE >= 2) {
+        sdata[tid] += sdata[tid + 1]; __syncwarp();
+    }
+}
+
+template <typename T, int BLOCK_SIZE>
 __global__
-void kernel_your_reduce(const T* __restrict__ buffer, T* __restrict__ total, int size)
+void kernel_your_reduce(const T* __restrict__ buffer, T* __restrict__ total)
 {
-    // TODO
     extern __shared__ int sdata[];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * blockDim.x * 2 + threadIdx.x;
+    unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
 
     sdata[tid] = buffer[i]+ buffer[i + blockDim.x];
     __syncthreads();
 
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s)
-            sdata[tid] += sdata[tid + s];
-        __syncthreads();
+    /*
+     * The maximum threads per block and the first iteration is
+     * blockDim.x / 2.
+     */ 
+    if constexpr (BLOCK_SIZE >= 512) {
+        if (tid < 256) {
+            sdata[tid] += sdata[tid + 256]; __syncthreads();
+        }
     }
+    if constexpr (BLOCK_SIZE >= 256) {
+        if (tid < 256) {
+            sdata[tid] += sdata[tid + 128]; __syncthreads();
+        }
+    }
+    if constexpr (BLOCK_SIZE >= 128) {
+        if (tid < 256) {
+            sdata[tid] += sdata[tid + 64]; __syncthreads();
+        }
+    }
+
+    if (tid < 32) warpReduce<BLOCK_SIZE>(sdata, tid);
 
     if (tid == 0)
         total[blockIdx.x] = sdata[0];
@@ -76,10 +120,15 @@ void your_reduce(cuda_tools::host_shared_ptr<int> buffer,
     int *tmp;
     cudaMalloc(&tmp, gridSize * sizeof(int));
 
-    kernel_your_reduce<int><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp, blockSize);
+    printf("First Kernels\n");
 
-    kernel_your_reduce<int><<<1, gridSize, sizeof(int) * gridSize>>>(tmp, total.data_, gridSize);
-    
+    kernel_your_reduce<int, 512><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
+    kernel_your_reduce<int, 256><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
+    kernel_your_reduce<int, 128><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
+   
+    printf("Last Kernel\n");
+    kernel_your_reduce<int, 64><<<1, gridSize / 2, sizeof(int) * gridSize>>>(tmp, total.data_);
+   
     cudaDeviceSynchronize();
     kernel_check_error();
     
