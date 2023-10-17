@@ -33,7 +33,7 @@ void baseline_reduce(cuda_tools::host_shared_ptr<int> buffer,
     cudaProfilerStop();
 }
 
-template <int BLOCK_SIZE>
+template<int BLOCK_SIZE>
 __device__
 void warpReduce(int* sdata, int tid) {
     /*
@@ -41,26 +41,14 @@ void warpReduce(int* sdata, int tid) {
      * reduce step, but it's legacy.
      * __syncwarp is more modern
      */
-
-    if (BLOCK_SIZE >= 64) {
-        sdata[tid] += sdata[tid + 32]; __syncwarp();
-    }
-    if (BLOCK_SIZE >= 32) {
-        sdata[tid] += sdata[tid + 16]; __syncwarp();
-    }
-    if (BLOCK_SIZE >= 16) {
-        sdata[tid] += sdata[tid + 8]; __syncwarp();
-    }
-    if (BLOCK_SIZE >= 8) {
-        sdata[tid] += sdata[tid + 4]; __syncwarp();
-    }
-    if (BLOCK_SIZE >= 4) {
-        sdata[tid] += sdata[tid + 2]; __syncwarp();
-    }
-    if (BLOCK_SIZE >= 2) {
-        sdata[tid] += sdata[tid + 1]; __syncwarp();
-    }
+    if constexpr (BLOCK_SIZE >= 64) sdata[tid] += sdata[tid + 32]; __syncwarp();
+    if constexpr (BLOCK_SIZE >= 32) sdata[tid] += sdata[tid + 16]; __syncwarp();
+    if constexpr (BLOCK_SIZE >= 16) sdata[tid] += sdata[tid + 8]; __syncwarp();
+    if constexpr (BLOCK_SIZE >= 8) sdata[tid] += sdata[tid + 4]; __syncwarp();
+    if constexpr (BLOCK_SIZE >= 4) sdata[tid] += sdata[tid + 2]; __syncwarp();
+    if constexpr (BLOCK_SIZE >= 2) sdata[tid] += sdata[tid + 1]; __syncwarp();
 }
+
 
 template <typename T, int BLOCK_SIZE>
 __global__
@@ -77,21 +65,29 @@ void kernel_your_reduce(const T* __restrict__ buffer, T* __restrict__ total)
     /*
      * The maximum threads per block and the first iteration is
      * blockDim.x / 2.
-     */ 
+     */
+    if constexpr (BLOCK_SIZE == 1024) {
+        if (tid < 512)
+            sdata[tid] += sdata[tid + 512];
+        __syncthreads();
+    }
+
     if constexpr (BLOCK_SIZE >= 512) {
-        if (tid < 256) {
-            sdata[tid] += sdata[tid + 256]; __syncthreads();
-        }
+        if (tid < 256)
+            sdata[tid] += sdata[tid + 256];
+        __syncthreads();
     }
+
     if constexpr (BLOCK_SIZE >= 256) {
-        if (tid < 256) {
-            sdata[tid] += sdata[tid + 128]; __syncthreads();
-        }
+        if (tid < 128)
+            sdata[tid] += sdata[tid + 128];
+        __syncthreads();
     }
+
     if constexpr (BLOCK_SIZE >= 128) {
-        if (tid < 256) {
-            sdata[tid] += sdata[tid + 64]; __syncthreads();
-        }
+        if (tid < 64)
+            sdata[tid] += sdata[tid + 64];
+        __syncthreads();
     }
 
     if (tid < 32) warpReduce<BLOCK_SIZE>(sdata, tid);
@@ -100,34 +96,65 @@ void kernel_your_reduce(const T* __restrict__ buffer, T* __restrict__ total)
         total[blockIdx.x] = sdata[0];
 }
 
+
 void your_reduce(cuda_tools::host_shared_ptr<int> buffer,
     cuda_tools::host_shared_ptr<int> total)
 {
     cudaProfilerStart();
 
     /*
-     * Si le nombre de threads est trop faible on va generer un grand nombre de blocs et le
-     * deuxieme appel au kernel ne va pas traiter toutes les valeurs car pas assez de threads dans un bloc
-     */ 
+    * Si le nombre de threads est trop faible on va generer un grand nombre de blocs et le
+    * deuxieme appel au kernel ne va pas traiter toutes les valeurs car pas assez de threads dans un bloc
+    */
     const int blockSize = 1024;
+
     /* 
      * On divise le nombre de blocs par 2 parce que chaque thread est desormais charge de load 2 valeurs, 
      * ceci a ete fait parce que au bout d'une iteration la moitie des threads etait inutilisee donc autant 
      * augmenter le work per thread
      */
-    const int gridSize = (buffer.size_ + blockSize - 1) / (blockSize * 2); 
+    const int gridSize = (buffer.size_ + blockSize - 1) / (blockSize * 2);
 
     int *tmp;
     cudaMalloc(&tmp, gridSize * sizeof(int));
 
-    printf("First Kernels\n");
-
-    kernel_your_reduce<int, 512><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
-    kernel_your_reduce<int, 256><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
-    kernel_your_reduce<int, 128><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
-   
-    printf("Last Kernel\n");
-    kernel_your_reduce<int, 64><<<1, gridSize / 2, sizeof(int) * gridSize>>>(tmp, total.data_);
+    kernel_your_reduce<int, 1024><<<gridSize, blockSize, sizeof(int) * blockSize>>>(buffer.data_, tmp);
+    
+    switch(gridSize / 2) {
+        case 1024:
+            kernel_your_reduce<int, 1024><<<1, 1024, sizeof(int) * 1024>>>(tmp, total.data_);
+            break;
+        case 512:
+            kernel_your_reduce<int, 512><<<1, 512, sizeof(int) * 512>>>(tmp, total.data_);
+            break;
+        case 256:
+            kernel_your_reduce<int, 256><<<1, 256, sizeof(int) * 256>>>(tmp, total.data_);
+            break;
+        case 128:
+            kernel_your_reduce<int, 128><<<1, 128, sizeof(int) * 128>>>(tmp, total.data_);
+            break;
+        case 64:
+            kernel_your_reduce<int, 64><<<1, 64, sizeof(int) * 64>>>(tmp, total.data_);
+            break;
+        case 32:
+            kernel_your_reduce<int, 32><<<1, 32, sizeof(int) * 32>>>(tmp, total.data_);
+            break;
+        case 16:
+            kernel_your_reduce<int, 16><<<1, 16, sizeof(int) * 16>>>(tmp, total.data_);
+            break;
+        case 8:
+            kernel_your_reduce<int, 8><<<1, 8, sizeof(int) * 8>>>(tmp, total.data_);
+            break;
+        case 4:
+            kernel_your_reduce<int, 4><<<1, 4, sizeof(int) * 4>>>(tmp, total.data_);
+            break;
+        case 2:
+            kernel_your_reduce<int, 2><<<1, 2, sizeof(int) * 2>>>(tmp, total.data_);
+            break;
+        case 1:
+            kernel_your_reduce<int, 1><<<1, 1, sizeof(int) * 1>>>(tmp, total.data_);
+            break;
+    }
    
     cudaDeviceSynchronize();
     kernel_check_error();
