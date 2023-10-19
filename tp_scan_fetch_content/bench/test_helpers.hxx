@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <benchmark/benchmark.h>
-#include <gtest/gtest.h>
+#include <iostream>
 
 template <typename FUNC>
 void check_buffer(cuda_tools::host_shared_ptr<int> buffer,

@@ -1,5 +1,11 @@
-cmake_minimum_required(VERSION 3.18)
+# -- Can be removed if not on OpenStack --
+# find_program(GCC_PATH gcc)
+# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --allow-unsupported-compiler")
+# add_compile_options("-Wno-error" "-Wno-pedantic" "-Wno-old-style-cast")
+# set(CMAKE_CUDA_HOST_COMPILER ${GCC_PATH})
+# -- /Can be removed if not on OpenStack --
 project(template)
+cmake_minimum_required(VERSION 3.18)
 
 include(FindCUDAToolkit)
 include(FetchContent)
@@ -28,7 +34,7 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED TRUE)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -extended-lambda --generate-line-info --expt-relaxed-constexpr")
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
-# set(CMAKE_CUDA_FLAGS "--ptxas-options=-v")
+#set(CMAKE_CUDA_FLAGS "--ptxas-options=-v")
 
 add_library(to_bench
   src/to_bench.cu
