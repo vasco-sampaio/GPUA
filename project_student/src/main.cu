@@ -123,30 +123,30 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
             input[i] = i;
         }
 
-        cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyHostToDevice);
+        // cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyHostToDevice);
+        // cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyHostToDevice);
 
         // Call the scan function
         scan(input, output, n);
 
-        cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyDeviceToHost);
+        // cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyDeviceToHost);
+        // cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyDeviceToHost);
 
         // Expected
-        std::cout << "Expected output : ";
-        int acc = 0;
-        for (int i = 0; i < n; ++i) {
-            acc += i;
-            std::cout << "| " << acc << " |";
-        }
-        std::cout << std::endl;
+        // std::cout << "Expected output : ";
+        // int acc = 0;
+        // for (int i = 0; i < n; ++i) {
+        //     acc += i;
+        //     std::cout << "| " << acc << " |";
+        // }
+        // std::cout << std::endl;
 
         // Print the output array
-        std::cout << "Output :          ";
-        for (int i = 0; i < n; ++i) {
-            std::cout << "| " << output[i] << " |";
-        }
-        std::cout << std::endl;
+        // std::cout << "Output :          ";
+        // for (int i = 0; i < n; ++i) {
+        //     std::cout << "| " << output[i] << " |";
+        // }
+        // std::cout << std::endl;
 
         delete[] input;
         delete[] output;
