@@ -1,12 +1,14 @@
+#include "scan.cuh"
+
 #define NUM_BANKS 32
 #define LOG_NUM_BANKS 5
 #define CONFLICT_FREE_OFFSET(n) \
         ((n) >> NUM_BANKS + (n) >> (2 * LOG_NUM_BANKS)) 
 
 
-__global__ void scan_kernel(int* input, int* output, int n) {
+__device__
+void block_scan_kernel(int* input, int* output, int tid, int n) {
     extern __shared__ int sdata[];
-    int tid = threadIdx.x;
     int offset = 1;
 
     int ai = tid; int bi = tid + (n / 2);
@@ -52,22 +54,63 @@ __global__ void scan_kernel(int* input, int* output, int n) {
     output[2 * tid + 1] = sdata[2 * tid + 1] + init2;
 }
 
+
+// flags : P ready; A local sum ready; X not ready 
+__global__
+void scan_kernel(int* input, int* output, cuda::std::atomic<char> *flags, int* counter) {
+    int bid = atomicAdd(counter, 1);
+    int tid = threadIdx.x;
+
+    block_scan_kernel(input + bid, output + bid, tid, blockDim.x / 2);
+
+    flags[bid].store('A');
+
+    if (*counter > 0) {
+        int i = *counter - 1;
+        char flag;
+        do {
+            flag = flags[i].load();
+
+            while (flag == 'X');
+
+            output[bid + tid] += output[i * blockDim.x + blockDim.x - 1];
+
+            if (flag == 'P')
+                break;
+
+            i -= 1;
+        } while (i > 0);
+
+        flags[bid].store('P');
+    }
+}
+
 void scan(int* input, int* output, int n) {
     int* d_input;
     int* d_output;
+    cuda::std::atomic<char>* d_flags;
+    int* d_counter;
 
     cudaMalloc(&d_input, n * sizeof(int));
     cudaMalloc(&d_output, n * sizeof(int));
 
+    cudaMalloc(&d_flags, n * sizeof(cuda::std::atomic<char>));
+    cudaMemset(&d_flags, 0, n * sizeof(cuda::std::atomic<char>));
+    
+    cudaMalloc(&d_counter, sizeof(int));
+    cudaMemset(&d_counter, -1, sizeof(int));
+
     cudaMemcpy(d_input, input, n * sizeof(int), cudaMemcpyHostToDevice);
 
-    int block_size = 32; // n / 2
+    int block_size = 256;
     int grid_size = (n + block_size - 1) / block_size;
 
-    scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(d_input, d_output, n);
+    scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(d_input, d_output, d_flags, d_counter);
 
     cudaMemcpy(output, d_output, n * sizeof(int), cudaMemcpyDeviceToHost);
 
     cudaFree(d_input);
     cudaFree(d_output);
+    cudaFree(d_flags);
+    cudaFree(d_counter);
 }
