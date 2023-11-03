@@ -23,14 +23,16 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}
 # set(CMAKE_CUDA_HOST_COMPILER /nix/store/pdlg6pavsff4aw9pil7xqg34z0z4hpk4-gcc-wrapper-9.5.0/bin/gcc)
 
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Ofast -march=native -flto -funroll-loops -ffast-math")
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 set(CMAKE_CUDA_FLAGS "-Xcompiler -fopenmp --extended-lambda --generate-line-info --expt-relaxed-constexpr ${CMAKE_CUDA_FLAGS}")
 #set(CMAKE_CUDA_FLAGS "--ptxas-options=-v --generate-line-info")
 
-add_executable(main src/main.cu src/fix_cpu.cu)
+add_executable(main src/main.cu src/fix_cpu.cu src/kernels/scan.cu src/kernels/scan.cu)
+
+set_target_properties(main PROPERTIES CUDA_ARCHITECTURES "50")
 
 target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
 
