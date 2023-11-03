@@ -1,6 +1,8 @@
 #include "image.hh"
 #include "pipeline.hh"
 #include "fix_cpu.cuh"
+#include "kernels/scan.cuh"
+#include "kernels/reduce.cuh"
 
 #include <vector>
 #include <iostream>
@@ -9,6 +11,9 @@
 #include <filesystem>
 #include <numeric>
 
+#define DEBUG true
+
+#if !DEBUG
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
     // -- Pipeline initialization
@@ -105,3 +110,47 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     return 0;
 }
+
+#else
+
+    int main() {
+        const int n = 64;
+        int* input = new int[n];
+        int* output = new int[n];
+
+        // Initialize the input array
+        for (int i = 0; i < n; ++i) {
+            input[i] = i;
+        }
+
+        cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyHostToDevice);
+
+        // Call the scan function
+        scan(input, output, n);
+
+        cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyDeviceToHost);
+
+        // Expected
+        std::cout << "Expected output : ";
+        int acc = 0;
+        for (int i = 0; i < n; ++i) {
+            acc += i;
+            std::cout << "| " << acc << " |";
+        }
+        std::cout << std::endl;
+
+        // Print the output array
+        std::cout << "Output :          ";
+        for (int i = 0; i < n; ++i) {
+            std::cout << "| " << output[i] << " |";
+        }
+        std::cout << std::endl;
+
+        delete[] input;
+        delete[] output;
+
+        return 0;
+    }
+#endif
