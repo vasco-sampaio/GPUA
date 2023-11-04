@@ -1,6 +1,6 @@
 template<int BLOCK_SIZE>
 __device__
-void warpReduce(int* sdata, int tid) {
+void warpReduce(int* sdata, const int tid) {
     if constexpr (BLOCK_SIZE >= 64) sdata[tid] += sdata[tid + 32]; __syncwarp();
     if constexpr (BLOCK_SIZE >= 32) sdata[tid] += sdata[tid + 16]; __syncwarp();
     if constexpr (BLOCK_SIZE >= 16) sdata[tid] += sdata[tid + 8]; __syncwarp();

@@ -29,3 +29,14 @@
 
 # Windows-specific files
 Thumbs.db
+
+# Visual Studio Code specific files
+.vscode/
+.settings/
+.history/
+
+# CLion specific files
+.idea/
+.cmake/
+CMakeFiles/
+

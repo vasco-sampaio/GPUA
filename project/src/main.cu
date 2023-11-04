@@ -112,9 +112,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 }
 
 #else
-
+    #include <cassert>
     int main() {
-        const int n = 64;
+        const int n = 256;
         int* input = new int[n];
         int* output = new int[n];
 
@@ -123,33 +123,45 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
             input[i] = i;
         }
 
-        // cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyHostToDevice);
-        // cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyHostToDevice);
+        int *d_input, *d_output;
+        cudaMalloc(&d_input, n * sizeof(int));
+        cudaMalloc(&d_output, n * sizeof(int));
 
+        cudaMemcpy(d_input, input, n * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_output, output, n * sizeof(int), cudaMemcpyHostToDevice);
+
+        std::cout << "Kernel launch" << std::endl;
         // Call the scan function
-        scan(input, output, n);
+        scan(d_input, d_output, n);
 
-        // cudaMemcpy(input, input, n * sizeof(int), cudaMemcpyDeviceToHost);
-        // cudaMemcpy(output, output, n * sizeof(int), cudaMemcpyDeviceToHost);
+        std::cout << "Kernel launch done" << std::endl;
+
+        cudaMemcpy(input, d_input, n * sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(output, d_output, n * sizeof(int), cudaMemcpyDeviceToHost);
+
+        assert(output[n- 1] == acc);
 
         // Expected
-        // std::cout << "Expected output : ";
-        // int acc = 0;
-        // for (int i = 0; i < n; ++i) {
-        //     acc += i;
-        //     std::cout << "| " << acc << " |";
-        // }
-        // std::cout << std::endl;
+        std::cout << "Expected output : ";
+        int acc = 0;
+        for (int i = 0; i < n; ++i) {
+            acc += i;
+            std::cout << "| " << acc << " |";
+        }
+        std::cout << std::endl;
 
         // Print the output array
-        // std::cout << "Output :          ";
-        // for (int i = 0; i < n; ++i) {
-        //     std::cout << "| " << output[i] << " |";
-        // }
-        // std::cout << std::endl;
+        std::cout << "Output :          ";
+        for (int i = 0; i < n; ++i) {
+            std::cout << "| " << output[i] << " |";
+        }
+        std::cout << std::endl;
 
         delete[] input;
         delete[] output;
+
+        cudaFree(d_input);
+        cudaFree(d_output);
 
         return 0;
     }
