@@ -5,6 +5,9 @@
 #include <iostream>
 #include <stdio.h>
 
+#define NEXT_POW_2(x) (1 << (32 - __builtin_clz(x - 1)))
+#define PREV_POW_2(x) (1 << (31 - __builtin_clz(x)))
+
 #define CUDA_CALL(x) cudaCheckError((x), __FILE__, __LINE__)
 
 inline cudaError_t cudaCheckError(cudaError_t result, const char *file, int line) {
@@ -19,37 +22,25 @@ __device__
 int scan_warp(int* data, const int tid) {
     const int lane = tid & 31; // index within the warp
 
-    // avoid race conditions
-    int temp;
-
-    if (lane >= 1) {
-        temp = data[tid - 1] + data[tid];
-        data[tid] = temp;
-    }
+    if (lane >= 1)
+        // avoid race conditions
+        atomicAdd(&data[tid], data[tid - 1]);
     __syncwarp();
 
-    if (lane >= 2) {
-        temp = data[tid - 2] + data[tid];
-        data[tid] = temp;
-    }
+    if (lane >= 2)
+        atomicAdd(&data[tid], data[tid - 2]);
     __syncwarp();
 
-    if (lane >= 4) {
-        temp = data[tid - 4] + data[tid];
-        data[tid] = temp;
-    }
+    if (lane >= 4)
+        atomicAdd(&data[tid], data[tid - 4]);
     __syncwarp();
 
-    if (lane >= 8) {
-        temp = data[tid - 8] + data[tid];
-        data[tid] = temp;
-    }
+    if (lane >= 8)
+        atomicAdd(&data[tid], data[tid - 8]);
     __syncwarp();
 
-    if (lane >= 16) {
-        temp = data[tid - 16] + data[tid];
-        data[tid] = temp;
-    }
+    if (lane >= 16)
+        atomicAdd(&data[tid], data[tid - 16]);
     __syncwarp();
 
     return data[tid];
@@ -91,7 +82,8 @@ void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, 
     __shared__ int bid;
     extern __shared__ int sdata[];
 
-    const int tid = threadIdx.x; 
+    const int tid = threadIdx.x;
+
     if (tid == 0)
         bid = atomicAdd(counter, 1);
     __syncthreads();
@@ -104,44 +96,33 @@ void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, 
 
     if (tid == blockDim.x - 1) {
         output[bid * blockDim.x + tid] = val;
-        flags[bid].store('A');
+        if (bid == 0)
+            flags[bid].store(1);
     }
     __syncthreads();
 
     if (bid > 0) {
-        int i = bid - 1;
-        char flag;
-        do {
-            flag = flags[i].load();
-
-            if (flag == 'X')
-                continue;
-
-            val += output[i * blockDim.x + blockDim.x - 1];
-
-            if (flag == 'P')
-                break;
-
-            i -= 1;
-        } while (i > 0);
+        while (flags[bid - 1].load() != 1);
+        val += output[(bid - 1) * blockDim.x + blockDim.x - 1];
     }
 
-    if (tid == blockDim.x - 1)
-        flags[bid].store('P');
     __syncthreads();
+
+    if (tid == blockDim.x - 1)
+        flags[bid].store(1);
 
     output[bid * blockDim.x + tid] = val;
 }
 
-void scan(int* input, int* output, int n) {
-    int block_size = 64;
+void scan_pow_2(int* input, int* output, int n) {
+    int block_size = 32; // in function of n
     int grid_size = (n + block_size - 1) / block_size;
 
     cuda::std::atomic<char>* flags;
     int* counter;
 
     CUDA_CALL(cudaMallocManaged(&flags, grid_size * sizeof(cuda::std::atomic<char>)));
-    CUDA_CALL(cudaMemset(flags, 'X', grid_size * sizeof(cuda::std::atomic<char>)));
+    CUDA_CALL(cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>)));
 
     CUDA_CALL(cudaMallocManaged(&counter, sizeof(int)));
     CUDA_CALL(cudaMemset(counter, 0, sizeof(int)));
@@ -152,4 +133,54 @@ void scan(int* input, int* output, int n) {
 
     CUDA_CALL(cudaFree(flags));
     CUDA_CALL(cudaFree(counter));
+}
+
+void scan(int* input, int* output, int n) {
+    long pow_2 = NEXT_POW_2(n);
+    if (n == pow_2) {
+        scan_pow_2(input, output, n);
+        return;
+    }
+
+    int prev_pow_2 = PREV_POW_2(n);
+
+    if (n - prev_pow_2 < pow_2 - n) {
+        scan_pow_2(input, output, prev_pow_2);
+
+        int *last = output + prev_pow_2 - 1;
+
+        int rem = n - prev_pow_2;
+        int n_rem = NEXT_POW_2(rem + 1);
+
+        int *rem_ptr;
+        int *output_rem;
+        CUDA_CALL(cudaMalloc(&output_rem, n_rem * sizeof(int)));
+        CUDA_CALL(cudaMalloc(&rem_ptr, n_rem * sizeof(int)));
+
+        CUDA_CALL(cudaMemcpy(rem_ptr, last, sizeof(int), cudaMemcpyDeviceToDevice));
+        CUDA_CALL(cudaMemcpy(rem_ptr + 1, input + prev_pow_2, rem * sizeof(int), cudaMemcpyDeviceToDevice));
+        CUDA_CALL(cudaMemset(rem_ptr + 1 + rem , 0, (n_rem - rem - 1) * sizeof(int)));
+
+        scan_pow_2(rem_ptr, output_rem, n_rem);
+
+        CUDA_CALL(cudaMemcpy(output + prev_pow_2, output_rem + 1, rem * sizeof(int), cudaMemcpyDeviceToDevice));
+
+        CUDA_CALL(cudaFree(rem_ptr));
+        CUDA_CALL(cudaFree(output_rem));
+    } else {
+        int *input_pow_2, *output_pow_2;
+
+        CUDA_CALL(cudaMalloc(&input_pow_2, pow_2 * sizeof(int)));
+        CUDA_CALL(cudaMalloc(&output_pow_2, pow_2 * sizeof(int)));
+
+        CUDA_CALL(cudaMemcpy(input_pow_2, input, n * sizeof(int), cudaMemcpyDeviceToDevice));
+        CUDA_CALL(cudaMemset(input_pow_2 + n, 0, (pow_2 - n) * sizeof(int)));
+
+        scan_pow_2(input_pow_2, output_pow_2, pow_2);
+
+        CUDA_CALL(cudaMemcpy(output, output_pow_2, n * sizeof(int), cudaMemcpyDeviceToDevice));
+
+        CUDA_CALL(cudaFree(input_pow_2));
+        CUDA_CALL(cudaFree(output_pow_2));
+    }
 }

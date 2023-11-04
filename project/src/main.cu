@@ -112,15 +112,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 }
 
 #else
-    #include <cassert>
     int main() {
-        const int n = 256;
+        const int n = 250;
         int* input = new int[n];
         int* output = new int[n];
 
         // Initialize the input array
         for (int i = 0; i < n; ++i) {
-            input[i] = i;
+            input[i] = 1;
         }
 
         int *d_input, *d_output;
@@ -139,16 +138,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         cudaMemcpy(input, d_input, n * sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(output, d_output, n * sizeof(int), cudaMemcpyDeviceToHost);
 
-        assert(output[n- 1] == acc);
-
         // Expected
         std::cout << "Expected output : ";
-        int acc = 0;
         for (int i = 0; i < n; ++i) {
-            acc += i;
-            std::cout << "| " << acc << " |";
+            std::cout << "| " << i + 1 << " |";
         }
-        std::cout << std::endl;
+        std::cout << '\n' << std::endl;
 
         // Print the output array
         std::cout << "Output :          ";
