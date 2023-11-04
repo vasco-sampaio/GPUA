@@ -7,4 +7,4 @@ enum class ScanType
 };
 
 template <ScanType type>
-void scan(int* input, int* output, int n);
+void scan(int* input, int* output, const int size, cudaStream_t* stream);
