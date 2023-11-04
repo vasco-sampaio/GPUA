@@ -113,7 +113,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
 #else
     int main() {
-        const int n = 250;
+        const int n = 107883;
         int* input = new int[n];
         int* output = new int[n];
 
@@ -131,7 +131,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
         std::cout << "Kernel launch" << std::endl;
         // Call the scan function
-        scan(d_input, d_output, n);
+        scan<ScanType::EXCLUSIVE>(d_input, d_output, n);
 
         std::cout << "Kernel launch done" << std::endl;
 
@@ -141,14 +141,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         // Expected
         std::cout << "Expected output : ";
         for (int i = 0; i < n; ++i) {
-            std::cout << "| " << i + 1 << " |";
+            std::cout << i << " ";
         }
-        std::cout << '\n' << std::endl;
+        std::cout << std::endl;
 
         // Print the output array
         std::cout << "Output :          ";
         for (int i = 0; i < n; ++i) {
-            std::cout << "| " << output[i] << " |";
+            std::cout << output[i] << " ";
         }
         std::cout << std::endl;
 
