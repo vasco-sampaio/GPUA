@@ -48,3 +48,94 @@
 //        CUDA_CALL(cudaFree(output_pow_2));
 //    }
 //}
+
+
+
+
+    int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
+    {
+        // -- Pipeline initialization
+
+        std::cout << "File loading..." << std::endl;
+
+        // - Get file paths
+
+        using recursive_directory_iterator = std::filesystem::recursive_directory_iterator;
+        std::vector<std::string> filepaths;
+        for (const auto& dir_entry : recursive_directory_iterator("/afs/cri.epita.fr/resources/teach/IRGPUA/images"))
+            filepaths.emplace_back(dir_entry.path());
+
+        Pipeline pipeline(filepaths);
+
+        // -- Main loop containing image retrying from pipeline and fixing
+
+        const int nb_images = pipeline.images.size();
+        std::cout << "Nb images: " << nb_images << std::endl;
+        std::vector<Image> images(nb_images);
+
+        // - Init streams
+        // const int nb_streams = 4;
+        // cudaStream_t* streams = new cudaStream_t[nb_streams];
+        // for (int i = 0; i < nb_streams; ++i) {
+        //     cudaStreamCreate(&streams[i]);
+        // }
+
+        std::cout << "Done, starting compute" << std::endl;
+
+        std::vector<int*> d_buffers(nb_images);
+
+        #pragma omp parallel for
+        for (int i = 0; i < nb_images; ++i)
+        {
+            // int stream_id = i % nb_streams;
+
+            images[for (int i = 0; i < nb_streams; ++i)
+            cudaStreamDestroy(streams[i]);
+ALL(cudaMalloc(&d_buffers[i], images[i].width * images[i].height * sizeof(int)));
+            // CUDA_CALL(cudaMemcpyAsync(d_buffers[i], images[i].buffer, images[i].width * images[i].height * sizeof(int), cudaMemcpyHostToDevice, streams[stream_id]));
+            CUDA_CALL(cudaMemcpy(d_buffers[i], images[i].buffer, images[i].width * images[i].height * sizeof(int), cudaMemcpyHostToDevice);
+
+            fix_image_gpu(d_buffers[i], images[i].size(), images[i].height * images[i].width, 0);
+
+            // CUDA_CALL(cudaMemcpyAsync(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost, streams[stream_id]));
+            CUDA_CALL(cudaMemcpy(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost));
+        }
+
+        // for (int i = 0; i < nb_images; ++i) {
+        //     int stream_id = i % nb_streams;
+        //     CUDA_CALL(cudaStreamSynchronize(streams[stream_id]));
+        // }
+
+        std::cout << "Done with compute, starting stats" << std::endl;
+
+        /* #pragma for (int i = 0; i < nb_streams; ++i)
+            cudaStreamDestroy(streams[i]);
+
+            return images[n++].to_sort;
+        });
+
+        std::sort(to_sort.begin(), to_sort.end(), [](ToSort a, ToSort b) {
+            return a.total < b.total;
+        });
+
+        for (int i = 0; i < nb_images; ++i)
+        {
+            std::cout << "Image #" << images[i].to_sort.id << " total : " << images[i].to_sort.total << std::endl;
+            std::ostringstream oss;
+            oss << "Image#" << images[i].to_sort.id << ".pgm";
+            std::string str = oss.str();
+            images[i].write(str);
+        }*/
+
+        // std::cout << "Done, the internet is safe now :)" << std::endl;
+
+        // Destroy streams
+        for (int i = 0; i < nb_streams; ++i)
+            cudaStreamDestroy(streams[i]);
+
+
+        for (int i = 0; i < nb_images; ++i)
+            CUDA_CALL(cudaFreeHost(images[i].buffer));
+
+        return 0;
+    }

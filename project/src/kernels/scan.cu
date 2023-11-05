@@ -46,8 +46,6 @@ int scan_block(int* data, const int tid) {
 
     // Step 1: Intra-warp scan in each warp
     int val = scan_warp<type>(data, tid);
-    if (type == ScanType::EXCLUSIVE && tid < 64)
-        printf("warpid: %d\ttid: %d\tval: %d\n", warpid, tid, val);
     __syncthreads();
 
     // Step 2: Collect per-warp partial results

@@ -42,15 +42,16 @@ void map_kernel(int* buffer, const int size) {
 
 
 __global__
-void find_if_kernel(int* buffer, predicate_t fct, int* result, const int size) {
+void find_if_kernel(int* buffer, int* result, const int value, const bool is_equal, const int size) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (tid < size && fct(buffer[tid])) {
+    if (tid < size && is_equal ? buffer[tid] == value : buffer[tid] != value) {
         int old = atomicCAS(result, -1, tid);
         if (old != -1)
             atomicMin(result, tid);
     }
 }
+
 
 
 void predicate(int* predicate, const int* buffer, const int size, cudaStream_t* stream) {
@@ -82,7 +83,9 @@ void map(int* buffer, const int size, cudaStream_t* stream) {
     CUDA_CALL(cudaDeviceSynchronize());
 }
 
-int find_if(int* buffer, predicate_t fct, const int size, cudaStream_t* stream) {
+
+int find_if(int* buffer, const int size, const int value, const bool is_equal, cudaStream_t* stream) {
+
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
@@ -90,7 +93,7 @@ int find_if(int* buffer, predicate_t fct, const int size, cudaStream_t* stream) 
     CUDA_CALL(cudaMallocManaged(&result, sizeof(int)));
     CUDA_CALL(cudaMemset(result, -1, sizeof(int)));
 
-    find_if_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, fct, result, size);
+    find_if_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, result, value, is_equal, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
 

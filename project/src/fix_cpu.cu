@@ -31,12 +31,6 @@ void fix_image_cpu(Image& to_fix)
         if (to_fix.buffer[i] != garbage_val)
             to_fix.buffer[predicate[i]] = to_fix.buffer[i];
 
-    /*
-    ** Intermediate Result: to_fix.buffer will store the good values at the beginning
-    ** by overwriting the existing values. We can get the new size of the buffer by
-    ** reading the last predicate case
-    */
-
     // #2 Apply map to fix pixels
 
     for (int i = 0; i < image_size; ++i)
