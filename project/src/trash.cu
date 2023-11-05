@@ -139,3 +139,100 @@ ALL(cudaMalloc(&d_buffers[i], images[i].width * images[i].height * sizeof(int)))
 
         return 0;
     }
+
+
+
+    __global__
+    void find_if_kernel(int* buffer, int* result, const int value, const bool is_equal, const int size) {
+        const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+        if (tid < size && is_equal ? buffer[tid] == value : buffer[tid] != value) {
+            int old = atomicCAS(result, -1, tid);
+            if (old != -1)
+                atomicMin(result, tid);
+        }
+    }
+
+
+int find_if(int* buffer, const int size, const int value, const bool is_equal) {
+
+    const int block_size = BLOCK_SIZE(size);
+    const int grid_size = (size + block_size - 1) / block_size;
+
+    int* result;
+    CUDA_CALL(cudaMallocManaged(&result, sizeof(int)));
+    CUDA_CALL(cudaMemset(result, -1, sizeof(int)));
+
+    find_if_kernel<<<grid_size, block_size, 0>>>(buffer, result, value, is_equal, size);
+
+    CUDA_CALL(cudaDeviceSynchronize());
+
+    int res = *result;
+    CUDA_CALL(cudaFree(result));
+
+    return res;
+}
+
+
+int main() {
+    int input[] = {
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+        // 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        // 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+    };
+    const int n = 40;
+    int* output = new int[n];
+
+    int *d_input, *d_output;
+    cudaMalloc(&d_input, n * sizeof(int));
+    cudaMalloc(&d_output, n * sizeof(int));
+    cudaMemcpy(d_input, input, n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_output, output, n * sizeof(int), cudaMemcpyHostToDevice);
+
+    std::cout << "Kernel launch" << std::endl;
+    // Call the scan function
+    scan<ScanType::EXCLUSIVE>(d_input, d_output, n);
+
+    std::cout << "Kernel launch done" << std::endl;
+
+    cudaMemcpy(output, d_output, n * sizeof(int), cudaMemcpyDeviceToHost);
+    // Expected
+    std::cout << "Expected output : ";
+    int acc = 0;
+    for (int i = 0; i < n; ++i) {
+        if (i > 0)
+            acc += input[i - 1];
+        std::cout << "| " << i << ": " << acc << " |";
+    }
+    std::cout << '\n' << std::endl;
+    std::cout << std::endl;
+
+    // Print the output array
+    std::cout << "Output :          ";
+    for (int i = 0; i < n; ++i)
+        std::cout << "| " << i << ": " << output[i] << " |";
+    std::cout << std::endl;
+
+    delete[] output;
+ 
+    cudaFree(d_input);
+    cudaFree(d_output);
+ 
+    return 0;
+}
+
+void print_array(int* array, int size, bool copy = false) {
+    if (copy) {
+        int* tmp = (int *)malloc(size * sizeof(int));
+        cudaMemcpy(tmp, array, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+        for (int i = 0; i < size; ++i)
+            std::cout << tmp[i] << " ";
+        std::cout << std::endl;
+
+        return;
+    }
+    for (int i = 0; i < size; ++i)
+        std::cout << array[i] << " ";
+    std::cout << std::endl;
+};

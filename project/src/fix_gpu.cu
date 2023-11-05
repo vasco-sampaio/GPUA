@@ -6,55 +6,43 @@
 #include <cmath>
 #include <iostream>
 
-#include "kernels/filter.cuh"
-#include "kernels/histogram.cuh"
-#include "kernels/scan.cuh"
-#include "kernels/utils.cuh"
+#include "kernels.cuh"
 
 
-void print_array(int* array, int size, bool copy = false) {
-    if (copy) {
-        int* tmp = (int *)malloc(size * sizeof(int));
-        cudaMemcpy(tmp, array, size * sizeof(int), cudaMemcpyDeviceToHost);
-
-        for (int i = 0; i < size; ++i)
-            std::cout << tmp[i] << " ";
-        std::cout << std::endl;
-
-        return;
-    }
-    for (int i = 0; i < size; ++i)
-        std::cout << array[i] << " ";
-    std::cout << std::endl;
-};
-
-
-void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
+void fix_image_gpu(Image& image)
 {
-    // #1 Compact
-    // Build predicate vector
-    int* predicate_scan;
-    CUDA_CALL(cudaMallocManaged(&predicate_scan, buffer_size * sizeof(int)));
-    CUDA_CALL(cudaMemset(predicate_scan, 0, buffer_size * sizeof(int)));
+    const int buffer_size = image.size();
+    const int image_size = image.width * image.height;
 
-    predicate(predicate_scan, buffer, buffer_size);
+    const int block_size = 256;
+    int grid_size = (buffer_size + block_size - 1) / block_size;
 
-    // Compute the exclusive sum of the predicate
-    scan<ScanType::EXCLUSIVE>(predicate_scan, predicate_scan, buffer_size);
+    int *d_buffer;
+    cudaMalloc(&d_buffer, buffer_size * sizeof(int));
+    cudaMemcpy(d_buffer, image.buffer, buffer_size * sizeof(int), cudaMemcpyHostToDevice);
+   
+    int* predicate;
+    cudaMalloc(&predicate, buffer_size * sizeof(int));
+    cudaMemset(predicate, 0, buffer_size * sizeof(int));
+    
+    cuda::std::atomic<int>* sums;
+    cudaMalloc(&sums, grid_size * sizeof(cuda::std::atomic<int>));
+    cudaMemset(sums, -1, grid_size * sizeof(cuda::std::atomic<int>));
 
-    // Scatter to the corresponding addresses
-    scatter(buffer, predicate_scan, buffer_size);
+    int* image_buffer;
+    cudaMalloc(&image_buffer, image_size * sizeof(int));
+    
+    std::cout << "Predicate" << std::endl;
+    predicate_kernel<<<grid_size, block_size>>>(predicate, d_buffer, buffer_size);
 
-    CUDA_CALL(cudaFree(predicate_scan));
+    std::cout << "Scan" << std::endl;
+    scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(predicate, predicate, sums, buffer_size, false);
 
-    // #2 Apply map to fix pixels
+    std::cout << "Scatter" << std::endl;
+    scatter_kernel<<<grid_size, block_size>>>(d_buffer, image_buffer, predicate, buffer_size);
 
-    // Verify that there are no -27 left
-    int first_minus_27 = find_if(buffer, image_size, -27, true);
-    if (first_minus_27 != image_size)
-        std::cout << "There are still -27 in the image: " << first_minus_27 << std::endl;
-
-    map(buffer, image_size);
+    // grid_size = (image_size + block_size - 1) / block_size;
+    // map_kernel<<<block_size, grid_size>>>(buffer, image_size);
 
 
     // #3 Histogram equalization
@@ -77,4 +65,11 @@ void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
 //    histogram_equalization(buffer, histo, new_image_size, histo[first_none_zero], 255);
 //
 //    CUDA_CALL(cudaFree(histo));
+
+    cudaMemcpy(image.buffer, d_buffer, image_size * sizeof(int), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_buffer);
+    cudaFree(image_buffer);
+    cudaFree(predicate);
+    cudaFree(sums);
 }

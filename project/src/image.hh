@@ -49,7 +49,7 @@ struct Image
             #if CPU
                 buffer = (int*)malloc(width * height * sizeof(int));
             #else
-                CUDA_CALL(cudaMallocHost(&buffer, width * height * sizeof(int)));
+                cudaMallocHost(&buffer, width * height * sizeof(int));
             #endif
             infile.seekg(1, infile.cur);
             for (int i = 0; i < width * height; ++i)
@@ -80,7 +80,7 @@ struct Image
             #if CPU
                 buffer = (int*)malloc(image_size * sizeof(int));
             #else
-                CUDA_CALL(cudaMallocHost(&buffer, image_size * sizeof(int)));
+                cudaMallocHost(&buffer, image_size * sizeof(int));
             #endif
 
             std::stringstream lineStream(line);

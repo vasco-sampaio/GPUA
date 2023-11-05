@@ -5,10 +5,8 @@
 
 #include "utils.cuh"
 
-
-template <ScanType type>
 __device__
-int scan_warp(int* data, const int tid) {
+int scan_warp(int* data, const int tid, bool inclusive) {
     const int lane = tid & 31; // index within the warp
 
     if (lane >= 1)
@@ -71,7 +69,6 @@ int scan_block(int* data, const int tid) {
 }
 
 
-template <ScanType type>
 __global__
 void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, int *counter, const int size) {
     __shared__ int bid;
@@ -81,7 +78,6 @@ void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, 
 
     if (tid == 0)
         bid = atomicAdd(counter, 1);
-
     __syncthreads();
 
     // thread divergence
@@ -91,11 +87,7 @@ void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, 
     sdata[tid] = input[bid * blockDim.x + tid];
     __syncthreads();
 
-    int val;
-    if (bid == 0)
-        val = scan_block<type>(sdata, tid);
-    else
-        val = scan_block<ScanType::INCLUSIVE>(sdata, tid);
+    int val = scan_block<type>(sdata, tid);
     __syncthreads();
 
     if (tid == blockDim.x - 1) {
@@ -107,7 +99,7 @@ void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, 
 
     if (bid > 0) {
         while (flags[bid - 1].load() != 1);
-        val += output[(bid - 1) * blockDim.x + blockDim.x - 1];
+        val += output[(bid - 1) * blockDim.x + blockDim.x - 1] + (type == ScanType::INCLUSIVE ? 0 : sdata[tid]);
     }
     __syncthreads();
 
