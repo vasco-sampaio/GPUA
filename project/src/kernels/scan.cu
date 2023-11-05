@@ -46,6 +46,8 @@ int scan_block(int* data, const int tid) {
 
     // Step 1: Intra-warp scan in each warp
     int val = scan_warp<type>(data, tid);
+    if (type == ScanType::EXCLUSIVE && tid < 64)
+        printf("warpid: %d\ttid: %d\tval: %d\n", warpid, tid, val);
     __syncthreads();
 
     // Step 2: Collect per-warp partial results
@@ -81,6 +83,7 @@ void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, 
 
     if (tid == 0)
         bid = atomicAdd(counter, 1);
+
     __syncthreads();
 
     // thread divergence
@@ -133,7 +136,7 @@ void single_block_scan_kernel(const int *input, int *output, const int size) {
     output[tid] = val;
 }
 
-
+#include <stdio.h>
 template <ScanType type>
 void scan(int* input, int* output, const int size, cudaStream_t* stream) {
     int block_size = BLOCK_SIZE(size);

@@ -1,5 +1,7 @@
 #include "filter.cuh"
 
+#include <cuda/atomic>
+
 #include "utils.cuh"
 
 
@@ -39,6 +41,18 @@ void map_kernel(int* buffer, const int size) {
 }
 
 
+__global__
+void find_if_kernel(int* buffer, predicate_t fct, int* result, const int size) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid < size && fct(buffer[tid])) {
+        int old = atomicCAS(result, -1, tid);
+        if (old != -1)
+            atomicMin(result, tid);
+    }
+}
+
+
 void predicate(int* predicate, const int* buffer, const int size, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
@@ -66,4 +80,22 @@ void map(int* buffer, const int size, cudaStream_t* stream) {
     map_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
+}
+
+int find_if(int* buffer, predicate_t fct, const int size, cudaStream_t* stream) {
+    const int block_size = BLOCK_SIZE(size);
+    const int grid_size = (size + block_size - 1) / block_size;
+
+    int* result;
+    CUDA_CALL(cudaMallocManaged(&result, sizeof(int)));
+    CUDA_CALL(cudaMemset(result, -1, sizeof(int)));
+
+    find_if_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, fct, result, size);
+
+    CUDA_CALL(cudaDeviceSynchronize());
+
+    int res = *result;
+    CUDA_CALL(cudaFree(result));
+
+    return res;
 }
