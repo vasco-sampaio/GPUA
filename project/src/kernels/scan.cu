@@ -136,13 +136,13 @@ void single_block_scan_kernel(const int *input, int *output, const int size) {
 
 #include <stdio.h>
 template <ScanType type>
-void scan(int* input, int* output, const int size, cudaStream_t* stream) {
+void scan(int* input, int* output, const int size) {
     int block_size = BLOCK_SIZE(size);
     int grid_size = (size + block_size - 1) / block_size;
 
     // if size is a power of two and inferior to 1024, we can use a single block
     if (size <= 1024 && NEXT_POW_2(size) == size) {
-        single_block_scan_kernel<type><<<1, block_size, block_size * sizeof(int), *stream>>>(input, output, size);
+        single_block_scan_kernel<type><<<1, block_size, block_size * sizeof(int)>>>(input, output, size);
         return;
     }
 
@@ -155,7 +155,7 @@ void scan(int* input, int* output, const int size, cudaStream_t* stream) {
     CUDA_CALL(cudaMallocManaged(&counter, sizeof(int)));
     CUDA_CALL(cudaMemset(counter, 0, sizeof(int)));
 
-    scan_kernel<type><<<grid_size, block_size, block_size * sizeof(int), *stream>>>(input, output, flags, counter, size);
+    scan_kernel<type><<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, flags, counter, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
 
@@ -164,5 +164,5 @@ void scan(int* input, int* output, const int size, cudaStream_t* stream) {
 }
 
 
-template void scan<ScanType::EXCLUSIVE>(int* input, int* output, const int size, cudaStream_t* stream);
-template void scan<ScanType::INCLUSIVE>(int* input, int* output, const int size, cudaStream_t* stream);
+template void scan<ScanType::EXCLUSIVE>(int* input, int* output, const int size);
+template void scan<ScanType::INCLUSIVE>(int* input, int* output, const int size);

@@ -23,10 +23,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     using recursive_directory_iterator = std::filesystem::recursive_directory_iterator;
     std::vector<std::string> filepaths;
-    for (const auto& dir_entry : recursive_directory_iterator("/afs/cri.epita.fr/resources/teach/IRGPUA/images")) {
+    for (const auto& dir_entry : recursive_directory_iterator("/afs/cri.epita.fr/resources/teach/IRGPUA/images"))
         filepaths.emplace_back(dir_entry.path());
-        break;
-    }
 
     // - Init pipeline object
 
@@ -55,7 +53,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
         CUDA_CALL(cudaMalloc(&d_buffers[i], images[i].width * images[i].height * sizeof(int)));
         CUDA_CALL(cudaMemcpy(d_buffers[i], images[i].buffer, images[i].width * images[i].height * sizeof(int), cudaMemcpyHostToDevice));
 
-        fix_image_gpu(d_buffers[i], images[i].width, images[i].height, 0);
+        fix_image_gpu(d_buffers[i], images[i].size(), images[i].width * images[i].height);
 
         CUDA_CALL(cudaMemcpy(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost));
     }

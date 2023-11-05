@@ -58,7 +58,7 @@ void reduce_kernel(const int* __restrict__ buffer, int* __restrict__ total)
 }
 
 
-void reduce(int* input, int* output, const int size, cudaStream_t* stream)
+void reduce(int* input, int* output, const int size)
 {
     const int blockSize = BLOCK_SIZE(size);
     const int gridSize = (size + blockSize - 1) / (blockSize * 2);
@@ -66,41 +66,41 @@ void reduce(int* input, int* output, const int size, cudaStream_t* stream)
     int *tmp;
     CUDA_CALL(cudaMalloc(&tmp, gridSize * sizeof(int)));
 
-    reduce_kernel<1024><<<gridSize, blockSize, sizeof(int) * blockSize, *stream>>>(input, tmp);
+    reduce_kernel<1024><<<gridSize, blockSize, sizeof(int) * blockSize>>>(input, tmp);
     
     switch(gridSize / 2) {
         case 1024:
-            reduce_kernel<1024><<<1, 1024, sizeof(int) * 1024, *stream>>>(tmp, output);
+            reduce_kernel<1024><<<1, 1024, sizeof(int) * 1024>>>(tmp, output);
             break;
         case 512:
-            reduce_kernel<512><<<1, 512, sizeof(int) * 512, *stream>>>(tmp, output);
+            reduce_kernel<512><<<1, 512, sizeof(int) * 512>>>(tmp, output);
             break;
         case 256:
-            reduce_kernel<256><<<1, 256, sizeof(int) * 256, *stream>>>(tmp, output);
+            reduce_kernel<256><<<1, 256, sizeof(int) * 256>>>(tmp, output);
             break;
         case 128:
-            reduce_kernel<128><<<1, 128, sizeof(int) * 128, *stream>>>(tmp, output);
+            reduce_kernel<128><<<1, 128, sizeof(int) * 128>>>(tmp, output);
             break;
         case 64:
-            reduce_kernel<64><<<1, 64, sizeof(int) * 64, *stream>>>(tmp, output);
+            reduce_kernel<64><<<1, 64, sizeof(int) * 64>>>(tmp, output);
             break;
         case 32:
-            reduce_kernel<32><<<1, 32, sizeof(int) * 32, *stream>>>(tmp, output);
+            reduce_kernel<32><<<1, 32, sizeof(int) * 32>>>(tmp, output);
             break;
         case 16:
-            reduce_kernel<16><<<1, 16, sizeof(int) * 16, *stream>>>(tmp, output);
+            reduce_kernel<16><<<1, 16, sizeof(int) * 16>>>(tmp, output);
             break;
         case 8:
-            reduce_kernel<8><<<1, 8, sizeof(int) * 8, *stream>>>(tmp, output);
+            reduce_kernel<8><<<1, 8, sizeof(int) * 8>>>(tmp, output);
             break;
         case 4:
-            reduce_kernel<4><<<1, 4, sizeof(int) * 4, *stream>>>(tmp, output);
+            reduce_kernel<4><<<1, 4, sizeof(int) * 4>>>(tmp, output);
             break;
         case 2:
-            reduce_kernel<2><<<1, 2, sizeof(int) * 2, *stream>>>(tmp, output);
+            reduce_kernel<2><<<1, 2, sizeof(int) * 2>>>(tmp, output);
             break;
         case 1:
-            reduce_kernel<1><<<1, 1, sizeof(int) * 1, *stream>>>(tmp, output);
+            reduce_kernel<1><<<1, 1, sizeof(int) * 1>>>(tmp, output);
             break;
     }
 

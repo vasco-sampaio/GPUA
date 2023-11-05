@@ -54,37 +54,37 @@ void find_if_kernel(int* buffer, int* result, const int value, const bool is_equ
 
 
 
-void predicate(int* predicate, const int* buffer, const int size, cudaStream_t* stream) {
+void predicate(int* predicate, const int* buffer, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    predicate_kernel<<<grid_size, block_size, 0, *stream>>>(predicate, buffer, size);
+    predicate_kernel<<<grid_size, block_size, 0>>>(predicate, buffer, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
 }
 
 
-void scatter(int* buffer, const int* predicate, const int size, cudaStream_t* stream) {
+void scatter(int* buffer, const int* predicate, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    scatter_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, predicate, size);
+    scatter_kernel<<<grid_size, block_size, 0>>>(buffer, predicate, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
 }
 
 
-void map(int* buffer, const int size, cudaStream_t* stream) {
+void map(int* buffer, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    map_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, size);
+    map_kernel<<<grid_size, block_size, 0>>>(buffer, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
 }
 
 
-int find_if(int* buffer, const int size, const int value, const bool is_equal, cudaStream_t* stream) {
+int find_if(int* buffer, const int size, const int value, const bool is_equal) {
 
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
@@ -93,7 +93,7 @@ int find_if(int* buffer, const int size, const int value, const bool is_equal, c
     CUDA_CALL(cudaMallocManaged(&result, sizeof(int)));
     CUDA_CALL(cudaMemset(result, -1, sizeof(int)));
 
-    find_if_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, result, value, is_equal, size);
+    find_if_kernel<<<grid_size, block_size, 0>>>(buffer, result, value, is_equal, size);
 
     CUDA_CALL(cudaDeviceSynchronize());
 

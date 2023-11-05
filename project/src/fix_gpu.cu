@@ -29,33 +29,32 @@ void print_array(int* array, int size, bool copy = false) {
 };
 
 
-void fix_image_gpu(int* buffer, const int buffer_size, const int image_size, cudaStream_t* stream)
+void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
 {
-    std::cout << "Buffer Size: " << buffer_size << "\tImage Size: " << image_size << std::endl;
     // #1 Compact
     // Build predicate vector
     int* predicate_scan;
     CUDA_CALL(cudaMallocManaged(&predicate_scan, buffer_size * sizeof(int)));
     CUDA_CALL(cudaMemset(predicate_scan, 0, buffer_size * sizeof(int)));
 
-    predicate(predicate_scan, buffer, buffer_size, stream);
+    predicate(predicate_scan, buffer, buffer_size);
 
     // Compute the exclusive sum of the predicate
-    scan<ScanType::EXCLUSIVE>(predicate_scan, predicate_scan, buffer_size, stream);
+    scan<ScanType::EXCLUSIVE>(predicate_scan, predicate_scan, buffer_size);
 
     // Scatter to the corresponding addresses
-    scatter(buffer, predicate_scan, buffer_size, stream);
+    scatter(buffer, predicate_scan, buffer_size);
 
     CUDA_CALL(cudaFree(predicate_scan));
 
     // #2 Apply map to fix pixels
 
     // Verify that there are no -27 left
-    int first_minus_27 = find_if(buffer, image_size, -27, true, stream);
+    int first_minus_27 = find_if(buffer, image_size, -27, true);
     if (first_minus_27 != image_size)
         std::cout << "There are still -27 in the image: " << first_minus_27 << std::endl;
 
-    map(buffer, image_size, stream);
+    map(buffer, image_size);
 
 
     // #3 Histogram equalization
@@ -65,17 +64,17 @@ void fix_image_gpu(int* buffer, const int buffer_size, const int image_size, cud
     // CUDA_CALL(cudaMemset(histo, 0, 256 * sizeof(int)));
 
     // std::cout << "Histo: " << std::endl;
-    // histogram(histo, buffer, new_image_size, stream);
+    // histogram(histo, buffer, new_image_size);
     // print_array(histo, 50);
 
     // Compute the inclusive sum scan of the histogram
-//    scan<ScanType::INCLUSIVE>(histo, histo, 256, stream);
+//    scan<ScanType::INCLUSIVE>(histo, histo, 256);
 //
 //    // Find the first non-zero value in the cumulative histogram
-//    int first_none_zero = find_if(histo, [](int v) { return v != 0; }, 256, stream);
+//    int first_none_zero = find_if(histo, [](int v) { return v != 0; }, 256);
 //
 //    // Apply the map transformation of the histogram equalization
-//    histogram_equalization(buffer, histo, new_image_size, histo[first_none_zero], 255, stream);
+//    histogram_equalization(buffer, histo, new_image_size, histo[first_none_zero], 255);
 //
 //    CUDA_CALL(cudaFree(histo));
 }
