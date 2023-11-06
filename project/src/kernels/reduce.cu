@@ -103,6 +103,4 @@ void reduce(int* input, int* output, const int size)
             reduce_kernel<1><<<1, 1, sizeof(int) * 1>>>(tmp, output);
             break;
     }
-
-
 }

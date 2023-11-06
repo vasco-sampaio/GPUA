@@ -62,8 +62,11 @@ void inclusive_scan_kernel(const int *input, int *output, cuda::std::atomic<char
     int val = scan_block(sdata, tid);
     __syncthreads();
 
-    if (bid == 0 && tid == size < blockDim.x ? size - 1 : blockDim.x - 1)
-        flags[0].store(1);
+    if (tid == size < blockDim.x ? size - 1 : blockDim.x - 1) {
+        output[bid * blockDim.x + tid] = val;
+        if (bid == 0)
+            flags[0].store(1);
+    }
 
     if (bid > 0 && tid == 0) {
         while (flags[bid - 1].load() == 0);
@@ -86,8 +89,8 @@ void exclusive_scan_kernel(const int *input, int* output, const int size) {
         output[tid] -= input[tid];
 }
 
-
-void scan(int* input, int* output, const int size, bool INCLUSIVE) {
+template <ScanType T>
+void scan(int* input, int* output, const int size) {
     int block_size = BLOCK_SIZE(size);
     int grid_size = (size + block_size - 1) / block_size;
 
@@ -98,8 +101,13 @@ void scan(int* input, int* output, const int size, bool INCLUSIVE) {
 
     inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, flags, size);
 
-    if (!INCLUSIVE)
+    if (T == EXCLUSIVE)
         exclusive_scan_kernel<<<grid_size, block_size, 0>>>(input, output, size);
 
     cudaFree(flags);
+
+    cudaDeviceSynchronize();
 }
+
+template void scan<EXCLUSIVE>(int* input, int* output, const int size);
+template void scan<INCLUSIVE>(int* input, int* output, const int size);

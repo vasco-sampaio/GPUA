@@ -10,6 +10,20 @@
 #include "kernels/filter.cuh"
 #include "kernels/histogram.cuh"
 
+void print_buffer(int* buffer, const int size, bool copy)
+{
+    if (copy)
+    {
+        int* host_buffer = new int[size];
+        cudaMemcpy(host_buffer, buffer, size * sizeof(int), cudaMemcpyDeviceToHost);
+        buffer = host_buffer;
+    }
+    std::cout << "[";
+    for (int i = 0; i < size; i++)
+        std::cout << buffer[i] << ", ";
+    std::cout << "]" << std::endl;
+}
+
 
 void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
 {
@@ -19,16 +33,16 @@ void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
 
     predicate(predicate_buffer, buffer, buffer_size);
 
-    scan(predicate_buffer, predicate_buffer, buffer_size, false);
+    scan<ScanType::EXCLUSIVE>(predicate_buffer, predicate_buffer, buffer_size);
 
     int* image_buffer;
     cudaMalloc(&image_buffer, image_size * sizeof(int));
 
     scatter(buffer, image_buffer, predicate_buffer, buffer_size);
 
+    print_buffer(image_buffer, 50, true);
+
     cudaFree(predicate_buffer);
-
-    cudaMemcpyAsync(buffer, image_buffer, image_size * sizeof(int), cudaMemcpyDeviceToDevice);
-
+    cudaMemcpy(buffer, image_buffer, image_size * sizeof(int), cudaMemcpyDeviceToDevice);
     cudaFree(image_buffer);
 }

@@ -41,6 +41,7 @@ void map_kernel(int* buffer, const int size) {
     }
 }
 
+
 void predicate(int* predicate_buffer, const int* buffer, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;

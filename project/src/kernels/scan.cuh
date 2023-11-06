@@ -1,3 +1,9 @@
 #pragma once
 
-void scan(int* input, int* output, const int size, bool INCLUSIVE=true);
+enum ScanType {
+    EXCLUSIVE,
+    INCLUSIVE
+};
+
+template <ScanType T>
+void scan(int* input, int* output, const int size);
