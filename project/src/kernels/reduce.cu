@@ -1,6 +1,6 @@
 #include "reduce.cuh"
 
-#include "utils.cuh"
+#include "utils.h"
 
 
 template<int BLOCK_SIZE>
@@ -64,7 +64,7 @@ void reduce(int* input, int* output, const int size)
     const int gridSize = (size + blockSize - 1) / (blockSize * 2);
 
     int *tmp;
-    CUDA_CALL(cudaMalloc(&tmp, gridSize * sizeof(int)));
+    cudaMalloc(&tmp, gridSize * sizeof(int));
 
     reduce_kernel<1024><<<gridSize, blockSize, sizeof(int) * blockSize>>>(input, tmp);
     
@@ -104,5 +104,5 @@ void reduce(int* input, int* output, const int size)
             break;
     }
 
-    CUDA_CALL(cudaDeviceSynchronize());
+
 }

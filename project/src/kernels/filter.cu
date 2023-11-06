@@ -2,24 +2,25 @@
 
 #include <cuda/atomic>
 
-#include "utils.cuh"
+#include "utils.h"
 
 
 __global__
-void predicate_kernel(int* predicate, const int* buffer, const int size) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+void predicate_kernel(int* predicate_buffer, const int* buffer, const int size) {
+    const int i = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (i < size)
-        predicate[i] = buffer[i] != -27 ? 1 : 0;
+        predicate_buffer[i] += (buffer[i] != -27);
 }
 
 
 __global__
-void scatter_kernel(int* buffer, const int* predicate, const int size) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+void scatter_kernel(const int* buffer, int* output, const int* predicate, const int size) {
+    const int i = threadIdx.x + blockIdx.x * blockDim.x;
 
-    if (i < size && buffer[i] != -27)
-        buffer[predicate[i]] = buffer[i];
+    if (i < size)
+        if (buffer[i] != -27)
+            output[predicate[i]] = buffer[i];
 }
 
 
@@ -40,34 +41,32 @@ void map_kernel(int* buffer, const int size) {
     }
 }
 
-
-void predicate(int* predicate, const int* buffer, const int size) {
+void predicate(int* predicate_buffer, const int* buffer, const int size, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    predicate_kernel<<<grid_size, block_size>>>(predicate, buffer, size);
+    predicate_kernel<<<grid_size, block_size, 0, *stream>>>(predicate_buffer, buffer, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+
 }
 
 
-void scatter(int* buffer, const int* predicate, const int size) {
+void scatter(int* buffer, int* output, const int* predicate, const int size, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    scatter_kernel<<<grid_size, block_size>>>(buffer, predicate, size);
+    scatter_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, output, predicate, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+
 }
 
 
-void map(int* buffer, const int size) {
+void map(int* buffer, const int size, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    map_kernel<<<grid_size, block_size>>>(buffer, size);
+    map_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+
 }
-
 

@@ -39,23 +39,43 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     std::cout << "Done, starting compute" << std::endl;
 
-    // -- Pipeline initialization
+    // - Init streams
+    const int nb_streams = 4;
+    cudaStream_t* streams = new cudaStream_t[nb_streams];
+    for (int i = 0; i < nb_streams; ++i) {
+        cudaStreamCreate(&streams[i]);
+    }
 
-    std::cout << "File loading..." << std::endl;
+    std::vector<int*> d_buffers(nb_images);
 
-    // - Get file paths
-
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int i = 0; i < nb_images; ++i)
     {
+        int stream_id = i % nb_streams;
         images[i] = pipeline.get_image(i);
-        fix_image_gpu(images[i]);
+
+        cudaMalloc(&d_buffers[i], images[i].size() * sizeof(int));
+        cudaMemcpyAsync(d_buffers[i], images[i].buffer, images[i].size() * sizeof(int), cudaMemcpyHostToDevice, streams[stream_id]);
+
+        fix_image_gpu(d_buffers[i], images[i].size(), images[i].width * images[i].height, &streams[stream_id]);
+
+        cudaMemcpyAsync(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost, streams[stream_id]);
+
+        cudaStreamSynchronize(streams[stream_id]);
+
+        cudaFree(d_buffers[i]);
     }
 
     std::cout << "Done with compute, starting stats" << std::endl;
 
-    for (int i = 0; i < nb_images; ++i)
+    for (int i = 0; i < nb_streams; ++i)
+        cudaStreamDestroy(streams[i]);
+
+    for (int i = 0; i < nb_images; ++i) {
         cudaFreeHost(images[i].buffer);
+    }
+
+    delete[] streams;
 
     return 0;
 }

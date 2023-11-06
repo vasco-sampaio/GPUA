@@ -3,65 +3,34 @@
 #include <cuda_runtime.h>
 #include <cuda/atomic>
 
-#include "utils.cuh"
+#include "utils.h"
 
 __device__
-int scan_warp(int* data, const int tid, bool inclusive) {
+int scan_warp(int* data, const int tid) {
     const int lane = tid & 31; // index within the warp
 
-    if (lane >= 1)
-        // avoid race conditions
-        atomicAdd(&data[tid], data[tid - 1]);
-    __syncwarp();
+    if (lane >= 1) data[tid] += data[tid - 1]; __syncwarp();
+    if (lane >= 2) data[tid] += data[tid - 2]; __syncwarp();
+    if (lane >= 4) data[tid] += data[tid - 4]; __syncwarp();
+    if (lane >= 8) data[tid] += data[tid - 8]; __syncwarp();
+    if (lane >= 16) data[tid] += data[tid - 16]; __syncwarp();
 
-    if (lane >= 2)
-        atomicAdd(&data[tid], data[tid - 2]);
-    __syncwarp();
-
-    if (lane >= 4)
-        atomicAdd(&data[tid], data[tid - 4]);
-    __syncwarp();
-
-    if (lane >= 8)
-        atomicAdd(&data[tid], data[tid - 8]);
-    __syncwarp();
-
-    if (lane >= 16)
-        atomicAdd(&data[tid], data[tid - 16]);
-    __syncwarp();
-
-    if (type == ScanType::EXCLUSIVE)
-        return lane > 0 ? data[tid - 1] : 0;
     return data[tid];
 }
 
 
-template <ScanType type>
 __device__
 int scan_block(int* data, const int tid) {
     const int lane = tid & 31;
     const int warpid = tid >> 5;
 
-    // Step 1: Intra-warp scan in each warp
-    int val = scan_warp<type>(data, tid);
+    int val = scan_warp(data, tid);
     __syncthreads();
 
-    // Step 2: Collect per-warp partial results
-    if(lane == 31)
-        data[warpid] = data[tid];
-    __syncthreads();
+    if(lane == 31) data[warpid] = data[tid]; __syncthreads();
+    if(warpid == 0) scan_warp(data, tid); __syncthreads();
+    if (warpid > 0) val += data[warpid - 1]; __syncthreads();
 
-    // Step 3: Use 1st warp to scan per-warp results
-    if(warpid == 0)
-        scan_warp<ScanType::INCLUSIVE>(data, tid);
-    __syncthreads();
-
-    // Step 4: Accumulate results from Steps 1 and 3
-    if (warpid > 0)
-        val += data[warpid - 1];
-    __syncthreads();
-
-    // Step 5: Write and return the final result
     data[tid] = val;
     __syncthreads();
 
@@ -69,92 +38,68 @@ int scan_block(int* data, const int tid) {
 }
 
 
+__device__ int block_count = 0;
+
 __global__
-void scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, int *counter, const int size) {
+void inclusive_scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, const int size) {
     __shared__ int bid;
+    __shared__ int global_sum;
     extern __shared__ int sdata[];
 
     const int tid = threadIdx.x;
 
     if (tid == 0)
-        bid = atomicAdd(counter, 1);
+        bid = atomicAdd(&block_count, 1);
     __syncthreads();
 
-    // thread divergence
     if (bid * blockDim.x + tid >= size)
         return;
 
-    sdata[tid] = input[bid * blockDim.x + tid];
+    int thread_value = input[bid * blockDim.x + tid];
+    sdata[tid] = thread_value;
     __syncthreads();
 
-    int val = scan_block<type>(sdata, tid);
+    int val = scan_block(sdata, tid);
     __syncthreads();
 
-    if (tid == blockDim.x - 1) {
-        output[bid * blockDim.x + tid] = val;
-        if (bid == 0)
-            flags[bid].store(1);
+    if (bid == 0 && tid == size < blockDim.x ? size - 1 : blockDim.x - 1)
+        flags[0].store(1);
+
+    if (bid > 0 && tid == 0) {
+        while (flags[bid - 1].load() == 0);
+        global_sum = output[(bid - 1) * blockDim.x + blockDim.x - 1];
     }
     __syncthreads();
 
-    if (bid > 0) {
-        while (flags[bid - 1].load() != 1);
-        val += output[(bid - 1) * blockDim.x + blockDim.x - 1] + (type == ScanType::INCLUSIVE ? 0 : sdata[tid]);
-    }
+    output[bid * blockDim.x + tid] = val + global_sum;
     __syncthreads();
-
-    if (tid == blockDim.x - 1)
+    if (tid == 0)
         flags[bid].store(1);
-
-    output[bid * blockDim.x + tid] = val;
 }
 
 
-template <ScanType type>
 __global__
-void single_block_scan_kernel(const int *input, int *output, const int size) {
-    extern __shared__ int sdata[];
+void exclusive_scan_kernel(const int *input, int* output, const int size) {
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-    const int tid = threadIdx.x;
-
-    sdata[tid] = input[tid];
-    __syncthreads();
-
-    int val = scan_block<type>(sdata, tid);
-    __syncthreads();
-
-    output[tid] = val;
+    if (tid < size)
+        output[tid] -= input[tid];
 }
 
-#include <stdio.h>
-template <ScanType type>
-void scan(int* input, int* output, const int size) {
+
+void scan(int* input, int* output, const int size, cudaStream_t* stream, bool INCLUSIVE) {
     int block_size = BLOCK_SIZE(size);
     int grid_size = (size + block_size - 1) / block_size;
 
-    // if size is a power of two and inferior to 1024, we can use a single block
-    if (size <= 1024 && NEXT_POW_2(size) == size) {
-        single_block_scan_kernel<type><<<1, block_size, block_size * sizeof(int)>>>(input, output, size);
-        return;
-    }
-
     cuda::std::atomic<char>* flags;
-    int* counter;
 
-    CUDA_CALL(cudaMallocManaged(&flags, grid_size * sizeof(cuda::std::atomic<char>)));
-    CUDA_CALL(cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>)));
+    cudaMalloc(&flags, grid_size * sizeof(cuda::std::atomic<char>));
+    cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>));
 
-    CUDA_CALL(cudaMallocManaged(&counter, sizeof(int)));
-    CUDA_CALL(cudaMemset(counter, 0, sizeof(int)));
+    inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), *stream>>>(input, output, flags, size);
 
-    scan_kernel<type><<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, flags, counter, size);
+    if (!INCLUSIVE)
+        exclusive_scan_kernel<<<grid_size, block_size, 0, *stream>>>(input, output, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
-
-    CUDA_CALL(cudaFree(flags));
-    CUDA_CALL(cudaFree(counter));
+    cudaFree(flags);
 }
-
-
-template void scan<ScanType::EXCLUSIVE>(int* input, int* output, const int size);
-template void scan<ScanType::INCLUSIVE>(int* input, int* output, const int size);

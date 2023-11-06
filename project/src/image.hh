@@ -8,7 +8,7 @@
 #include <sstream>
 
 #include "config.h"
-#include "kernels/utils.cuh"
+#include "kernels/utils.h"
 
 struct Image
 {
