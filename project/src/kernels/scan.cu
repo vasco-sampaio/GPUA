@@ -87,7 +87,7 @@ void exclusive_scan_kernel(const int *input, int* output, const int size) {
 }
 
 
-void scan(int* input, int* output, const int size, cudaStream_t* stream, bool INCLUSIVE) {
+void scan(int* input, int* output, const int size, bool INCLUSIVE) {
     int block_size = BLOCK_SIZE(size);
     int grid_size = (size + block_size - 1) / block_size;
 
@@ -96,10 +96,10 @@ void scan(int* input, int* output, const int size, cudaStream_t* stream, bool IN
     cudaMalloc(&flags, grid_size * sizeof(cuda::std::atomic<char>));
     cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>));
 
-    inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), *stream>>>(input, output, flags, size);
+    inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, flags, size);
 
     if (!INCLUSIVE)
-        exclusive_scan_kernel<<<grid_size, block_size, 0, *stream>>>(input, output, size);
+        exclusive_scan_kernel<<<grid_size, block_size, 0>>>(input, output, size);
 
     cudaFree(flags);
 }

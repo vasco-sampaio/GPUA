@@ -41,32 +41,26 @@ void map_kernel(int* buffer, const int size) {
     }
 }
 
-void predicate(int* predicate_buffer, const int* buffer, const int size, cudaStream_t* stream) {
+void predicate(int* predicate_buffer, const int* buffer, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    predicate_kernel<<<grid_size, block_size, 0, *stream>>>(predicate_buffer, buffer, size);
-
-
+    predicate_kernel<<<grid_size, block_size, 0>>>(predicate_buffer, buffer, size);
 }
 
 
-void scatter(int* buffer, int* output, const int* predicate, const int size, cudaStream_t* stream) {
+void scatter(int* buffer, int* output, const int* predicate, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    scatter_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, output, predicate, size);
-
-
+    scatter_kernel<<<grid_size, block_size, 0>>>(buffer, output, predicate, size);
 }
 
 
-void map(int* buffer, const int size, cudaStream_t* stream) {
+void map(int* buffer, const int size) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    map_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, size);
-
-
+    map_kernel<<<grid_size, block_size, 0>>>(buffer, size);
 }
 

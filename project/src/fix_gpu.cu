@@ -11,26 +11,24 @@
 #include "kernels/histogram.cuh"
 
 
-#include <iostream>
-
-void fix_image_gpu(int* buffer, const int buffer_size, const int image_size, cudaStream_t* stream)
+void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
 {
     int* predicate_buffer;
     cudaMalloc(&predicate_buffer, buffer_size * sizeof(int));
     cudaMemset(predicate_buffer, 0, buffer_size * sizeof(int));
 
-    predicate(predicate_buffer, buffer, buffer_size, stream);
+    predicate(predicate_buffer, buffer, buffer_size);
 
-    scan(predicate_buffer, predicate_buffer, buffer_size, stream, false);
+    scan(predicate_buffer, predicate_buffer, buffer_size, false);
 
     int* image_buffer;
     cudaMalloc(&image_buffer, image_size * sizeof(int));
 
-    scatter(buffer, image_buffer, predicate_buffer, buffer_size, stream);
+    scatter(buffer, image_buffer, predicate_buffer, buffer_size);
 
     cudaFree(predicate_buffer);
 
-    cudaMemcpyAsync(buffer, image_buffer, image_size * sizeof(int), cudaMemcpyDeviceToDevice, *stream);
+    cudaMemcpyAsync(buffer, image_buffer, image_size * sizeof(int), cudaMemcpyDeviceToDevice);
 
     cudaFree(image_buffer);
 }
