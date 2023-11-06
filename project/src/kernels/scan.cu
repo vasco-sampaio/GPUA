@@ -112,7 +112,7 @@ void single_block_scan_kernel(const int *input, int *output, const int size) {
 
 
 template <ScanType type>
-void scan(int* input, int* output, const int size, cudaStream_t* stream) {
+void scan(int* input, int* output, const int size, cudaStream_t& stream) {
     int block_size = 256; // 256 because of the shared memory size
     int grid_size = (size + block_size - 1) / block_size;
 
@@ -122,26 +122,22 @@ void scan(int* input, int* output, const int size, cudaStream_t* stream) {
     }
 
     if (grid_size == 1) {
-        single_block_scan_kernel<<<1, block_size, block_size * sizeof(int), *stream>>>(input, output, size);
+        single_block_scan_kernel<<<1, block_size, block_size * sizeof(int), stream>>>(input, output, size);
     } else {
         cuda::std::atomic<char>* flags;
 
         CUDA_CALL(cudaMallocManaged(&flags, grid_size * sizeof(cuda::std::atomic<char>)));
         CUDA_CALL(cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>)));
 
-        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), *stream>>>(input, output, flags, size);
+        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), stream>>>(input, output, flags, size);
 
         CUDA_CALL(cudaFree(flags));
     }
 
-    if (ScanType::EXCLUSIVE == type) {
-        CUDA_CALL(cudaStreamSynchronize(*stream));
-        shift_kernel<<<grid_size, block_size, 0, *stream>>>(input, output, size);
-    }
-
-    CUDA_CALL(cudaStreamSynchronize(*stream));
+    if (ScanType::EXCLUSIVE == type)
+        shift_kernel<<<grid_size, block_size, 0, stream>>>(input, output, size);
 }
 
 
-template void scan<ScanType::EXCLUSIVE>(int* input, int* output, const int size, cudaStream_t* stream);
-template void scan<ScanType::INCLUSIVE>(int* input, int* output, const int size, cudaStream_t* stream);
+template void scan<ScanType::EXCLUSIVE>(int* input, int* output, const int size, cudaStream_t& stream);
+template void scan<ScanType::INCLUSIVE>(int* input, int* output, const int size, cudaStream_t& stream);

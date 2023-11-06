@@ -1,3 +1,4 @@
+#include "cuda_streams.cuh"
 #include "image.hh"
 #include "pipeline.hh"
 #include "fix_cpu.cuh"
@@ -122,10 +123,8 @@
 
         using recursive_directory_iterator = std::filesystem::recursive_directory_iterator;
         std::vector<std::string> filepaths;
-        for (const auto& dir_entry : recursive_directory_iterator("/afs/cri.epita.fr/resources/teach/IRGPUA/images")) {
+        for (const auto& dir_entry : recursive_directory_iterator("/afs/cri.epita.fr/resources/teach/IRGPUA/images"))
             filepaths.emplace_back(dir_entry.path());
-            break;
-        }
 
         // - Init pipeline object
 
@@ -138,32 +137,16 @@
         std::vector<Image> images(nb_images);
 
         // - Init streams
-        const int nb_streams = 8;
-        cudaStream_t* streams = new cudaStream_t[nb_streams];
-        for (int i = 0; i < nb_streams; ++i) {
-            cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
-        }
+        initializeStreams();
 
         std::cout << "Done, starting compute" << std::endl;
 
-        std::vector<int*> d_buffers(nb_images);
-
-        #pragma omp parallel for
-        for (int i = 0; i < nb_images; ++i)
-        {
-            int stream_id = i % nb_streams;
-
+        for (int i = 0; i < nb_images; ++i) {
+            cudaStream_t stream = getStream(i % NUM_STREAMS);
             images[i] = pipeline.get_image(i);
-
-            CUDA_CALL(cudaMalloc(&d_buffers[i], images[i].size() * sizeof(int)));
-            CUDA_CALL(cudaMemcpyAsync(d_buffers[i], images[i].buffer, images[i].size() * sizeof(int), cudaMemcpyHostToDevice, streams[stream_id]));
-
-            fix_image_gpu(d_buffers[i], images[i].size(), images[i].width * images[i].height, &streams[stream_id]);
-
-            CUDA_CALL(cudaMemcpyAsync(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost, streams[stream_id]));
+            fix_image_gpu(images[i], stream);
+            cudaStreamSynchronize(stream);
         }
-
-        CUDA_CALL(cudaDeviceSynchronize());
 
         std::cout << "Done with compute, starting stats" << std::endl;
 
@@ -218,13 +201,10 @@
 ////            CUDA_CALL(cudaFree(d_buffers[i]));
 
         // - free streams
-        for (int i = 0; i < nb_streams; ++i)
-            cudaStreamDestroy(streams[i]);
+        cleanupStreams();
 
-        for (int i = 0; i < nb_images; ++i) {
-            CUDA_CALL(cudaFree(d_buffers[i]));
+        for (int i = 0; i < nb_images; ++i)
             CUDA_CALL(cudaFreeHost(images[i].buffer));
-        }
 
         return 0;
     }

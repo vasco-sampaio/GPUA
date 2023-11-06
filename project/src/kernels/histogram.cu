@@ -13,8 +13,6 @@ void histogram_kernel(int *histogram, const int *buffer, const int size) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int offset = blockDim.x * gridDim.x;
     while (i < size) {
-        if (buffer[i] < 0 || buffer[i] > 255)
-            printf("ERROR: %d\n", buffer[i]);
         atomicAdd(&sdata[buffer[i]], 1);
         i += offset;
     }
@@ -34,22 +32,20 @@ void histogram_equalization_kernel(int* buffer, const int* histogram, const int 
 }
 
 
-void histogram(int* histogram, const int* buffer, const int size, cudaStream_t* stream) {
+void histogram(int* histogram, const int* buffer, const int size, cudaStream_t& stream) {
     const int block_size = 256;
     const int grid_size = (size + block_size - 1) / block_size;
 
     CUDA_CALL(cudaMemset(histogram, 0, 256 * sizeof(int)));
 
-    histogram_kernel<<<grid_size, block_size, 0, *stream>>>(histogram, buffer, size);
+    histogram_kernel<<<grid_size, block_size, 0, stream>>>(histogram, buffer, size);
 
-    CUDA_CALL(cudaStreamSynchronize(*stream));
 }
 
 
-void histogram_equalization(int* buffer, const int* histogram, const int size, const int cdf_min_idx, cudaStream_t* stream) {
+void histogram_equalization(int* buffer, const int* histogram, const int size, const int cdf_min_idx, cudaStream_t& stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    histogram_equalization_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, histogram, size, cdf_min_idx);
-    CUDA_CALL(cudaStreamSynchronize(*stream));
+    histogram_equalization_kernel<<<grid_size, block_size, 0, stream>>>(buffer, histogram, size, cdf_min_idx);
 }
