@@ -26,7 +26,14 @@ inline void print_array(const int* array, const int size, std::string title, boo
         int* tmp = new int[size];
         CUDA_CALL(cudaMemcpy(tmp, array, size * sizeof(int), cudaMemcpyDeviceToHost));
         array = tmp;
+        for (int i = 0; i < size; i++) {
+            printf("%d ", array[i]);
+        }
+        printf("\n");
+        delete[] tmp;
+        return;
     }
+
     for (int i = 0; i < size; i++) {
         printf("%d ", array[i]);
     }

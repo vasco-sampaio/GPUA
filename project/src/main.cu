@@ -142,10 +142,10 @@
         std::cout << "Done, starting compute" << std::endl;
 
         for (int i = 0; i < nb_images; ++i) {
-            cudaStream_t stream = getStream(i % NUM_STREAMS);
+            cudaStream_t stream = 0; // getStream(i % NUM_STREAMS);
             images[i] = pipeline.get_image(i);
             fix_image_gpu(images[i], stream);
-            cudaStreamSynchronize(stream);
+            // cudaStreamSynchronize(stream);
         }
 
         std::cout << "Done with compute, starting stats" << std::endl;

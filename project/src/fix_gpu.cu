@@ -21,11 +21,16 @@ void fix_image_gpu(Image& image, cudaStream_t& stream) {
     CUDA_CALL(cudaMemcpyAsync(d_buffer, image.buffer, buffer_size, cudaMemcpyHostToDevice, stream));
 
     predicate(d_predicate_buffer, d_buffer, buffer_size, stream);
+
     scan<ScanType::EXCLUSIVE>(d_predicate_buffer, d_predicate_buffer, buffer_size, stream);
+    printf("Scan done\n");
+
     scatter(d_buffer, d_buffer, d_predicate_buffer, buffer_size, stream);
+    printf("Scatter done\n");
+    
+    CUDA_CALL(cudaFree(d_predicate_buffer)); // stuck here
 
-    CUDA_CALL(cudaFree(d_predicate_buffer));
-
+    printf("Map\n");
     map(d_buffer, image_size, stream);
 
     CUDA_CALL(cudaMalloc(&d_histo, 256 * sizeof(int)));

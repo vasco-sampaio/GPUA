@@ -36,7 +36,8 @@ add_executable(main src/main.cu
                     src/kernels/scan.cu
                     src/kernels/reduce.cu
                     src/kernels/histogram.cu
-                    src/kernels/filter.cu)
+                    src/kernels/filter.cu
+                    src/cuda_streams.cu)
 
 set_target_properties(main PROPERTIES CUDA_ARCHITECTURES "75")
 

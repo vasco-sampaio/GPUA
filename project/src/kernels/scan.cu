@@ -42,9 +42,10 @@ int scan_block(int* data, const int tid) {
 
 
 __device__ int block_count = 0;
+__device__ volatile int blocks_executed = 0;
 
 __global__
-void inclusive_scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, const int size) {
+void inclusive_scan_kernel(const int *input, int *output, const int size) {
     __shared__ int bid;
     __shared__ int global_sum;
     extern __shared__ int sdata[];
@@ -62,24 +63,21 @@ void inclusive_scan_kernel(const int *input, int *output, cuda::std::atomic<char
     __syncthreads();
 
     int val = scan_block(sdata, tid);
-    __syncthreads();
 
-    if (tid == blockDim.x - 1) {
+    if (tid == blockDim.x - 1)
         output[bid * blockDim.x + tid] = val;
-        if (bid == 0)
-            flags[bid].store(1);
-    }
     __syncthreads();
 
-    if (bid > 0) {
-        while (flags[bid - 1].load() != 1);
+    if (bid > 0 && tid == 0) {
+        while (blocks_executed < bid);
         global_sum = output[(bid - 1) * blockDim.x + blockDim.x - 1];
+        __threadfence_system();
     }
     __syncthreads();
 
     output[bid * blockDim.x + tid] = val + global_sum;
     if (tid == blockDim.x - 1)
-        flags[bid].store(1);
+        ++blocks_executed;
 }
 
 
@@ -121,21 +119,14 @@ void scan(int* input, int* output, const int size, cudaStream_t& stream) {
         grid_size = 1;
     }
 
-    if (grid_size == 1) {
+    if (grid_size == 1)
         single_block_scan_kernel<<<1, block_size, block_size * sizeof(int), stream>>>(input, output, size);
-    } else {
-        cuda::std::atomic<char>* flags;
-
-        CUDA_CALL(cudaMallocManaged(&flags, grid_size * sizeof(cuda::std::atomic<char>)));
-        CUDA_CALL(cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>)));
-
-        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), stream>>>(input, output, flags, size);
-
-        CUDA_CALL(cudaFree(flags));
-    }
+    else
+        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), stream>>>(input, output, size);
 
     if (ScanType::EXCLUSIVE == type)
         shift_kernel<<<grid_size, block_size, 0, stream>>>(input, output, size);
+
 }
 
 
