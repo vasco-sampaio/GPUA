@@ -60,7 +60,7 @@ void reduce_kernel(const int* __restrict__ buffer, int* __restrict__ total)
 
 void reduce(int* input, int* output, const int size, cudaStream_t* stream)
 {
-    const int blockSize = BLOCK_SIZE(size);
+    const int blockSize = 256;
     const int gridSize = (size + blockSize - 1) / (blockSize * 2);
 
     int *tmp;
@@ -104,5 +104,5 @@ void reduce(int* input, int* output, const int size, cudaStream_t* stream)
             break;
     }
 
-    CUDA_CALL(cudaDeviceSynchronize());
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 }

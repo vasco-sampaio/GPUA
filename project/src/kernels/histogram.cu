@@ -15,11 +15,14 @@ void histogram_kernel(int* histogram, const int* buffer, const int size) {
 
 
 __global__
-void histogram_equalization_kernel(int* buffer, const int* histogram, const int size, const int min, const int max) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+void histogram_equalization_kernel(int* buffer, const int* histogram, const int size, const int cdf_min_idx) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (i < size)
-        buffer[i] = (buffer[i] - min) * (max - min) / (size - 1);
+    if (tid < size) {
+        const int cdf_min = histogram[cdf_min_idx];
+        float normalized_pixel = (float)(histogram[buffer[tid]] - cdf_min) / (float)(size - cdf_min);
+        buffer[tid] = static_cast<int>(normalized_pixel * 255.0f);
+    }
 }
 
 
@@ -31,15 +34,14 @@ void histogram(int* histogram, const int* buffer, const int size, cudaStream_t* 
 
     histogram_kernel<<<grid_size, block_size, 0, *stream>>>(histogram, buffer, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 }
 
 
-void histogram_equalization(int* buffer, const int* histogram, const int size, const int min, const int max, cudaStream_t* stream) {
+void histogram_equalization(int* buffer, const int* histogram, const int size, const int cdf_min_idx, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    histogram_equalization_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, histogram, size, min, max);
-
-    CUDA_CALL(cudaDeviceSynchronize());
+    histogram_equalization_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, histogram, size, cdf_min_idx);
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 }

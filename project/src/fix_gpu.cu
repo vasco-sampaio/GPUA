@@ -27,61 +27,70 @@ void print_array(int* array, int size, bool copy = false) {
     std::cout << std::endl;
 };
 
-void fix_image_gpu(int* buffer, const int width, const int height, cudaStream_t* stream)
+void fix_image_gpu(int* buffer, const int buffer_size, const int image_size, cudaStream_t* stream)
 {
-    int image_size = width * height;
-
     // #1 Compact
     // Build predicate vector
-    int* predicate_scan;
-    CUDA_CALL(cudaMallocManaged(&predicate_scan, image_size * sizeof(int)));
-    CUDA_CALL(cudaMemset(predicate_scan, 0, image_size * sizeof(int)));
-    std::cout << "Buffer: " << std::endl;
+    int* predicate_buffer;
+    CUDA_CALL(cudaMallocManaged(&predicate_buffer, buffer_size * sizeof(int)));
+    CUDA_CALL(cudaMemset(predicate_buffer, 0, buffer_size * sizeof(int)));
+    // std::cout << "Buffer: " << std::endl;
     // print_array(buffer, 50, true);
 
-    predicate(predicate_scan, buffer, image_size, stream);
-    std::cout << "Predicate: " << std::endl;
-    print_array(predicate_scan, 50);
+    predicate(predicate_buffer, buffer, buffer_size, stream);
+//    std::cout << "Predicate: " << std::endl;
+//    print_array(predicate_buffer, 50);
 
     // Compute the exclusive sum of the predicate
-    scan<ScanType::EXCLUSIVE>(predicate_scan, predicate_scan, image_size, stream);
-    std::cout << "Scan: " << std::endl;
-    print_array(predicate_scan, 50);
+    scan<ScanType::EXCLUSIVE>(predicate_buffer, predicate_buffer, buffer_size, stream);
+//    std::cout << "Scan: " << std::endl;
+//    print_array(predicate_buffer, 50);
 
     // Scatter to the corresponding addresses
-    scatter(buffer, predicate_scan, image_size, stream);
-    std::cout << "Scatter: " << std::endl;
-    // print_array(buffer, 50, true);
+    int* image_buffer;
+    cudaMalloc(&image_buffer, image_size * sizeof(int));
+
+    scatter(buffer, image_buffer, predicate_buffer, buffer_size, stream);
+//    std::cout << "Scatter: " << std::endl;
+//    print_array(image_buffer, 50, true);
+
+    CUDA_CALL(cudaFree(predicate_buffer));
 
     // #2 Apply map to fix pixels
-    // std::cout << "Old image size: " << image_size << "\tNew image size: " << predicate_scan[image_size - 1] << std::endl;
-    const int new_image_size = predicate_scan[image_size - 1];
-    CUDA_CALL(cudaFree(predicate_scan));
 
-    // Verify that there are no -27 left
-    int first_minus_27 = find_if(buffer, [](auto v) { return v == -27; }, new_image_size, stream);
-    if (first_minus_27 != -1)
-        std::cout << "There are still -27 in the image: " << first_minus_27 << std::endl;
+    map(image_buffer, image_size, stream);
+//    std::cout << "Map: " << std::endl;
+//    print_array(image_buffer, 50, true);
 
+    // #3 Histogram equalization
+    // Histogram
 
-//    map(buffer, new_image_size, stream);
-//
-//    // #3 Histogram equalization
-//    // Histogram
-//    int* histo;
-//    CUDA_CALL(cudaMallocManaged(&histo, 256 * sizeof(int)));
-//    CUDA_CALL(cudaMemset(histo, 0, 256 * sizeof(int)));
-//
-//    histogram(histo, buffer, new_image_size, stream);
-//
-//    // Compute the inclusive sum scan of the histogram
-//    scan<ScanType::INCLUSIVE>(histo, histo, 256, stream);
-//
-//    // Find the first non-zero value in the cumulative histogram
-//    int first_none_zero = find_if(histo, [](auto v) { return v != 0; }, 256, stream);
-//
-//    // Apply the map transformation of the histogram equalization
-//    histogram_equalization(buffer, histo, new_image_size, histo[first_none_zero], 255, stream);
-//
-//    CUDA_CALL(cudaFree(histo));
+    int* histo;
+    CUDA_CALL(cudaMalloc(&histo, 256 * sizeof(int)));
+    CUDA_CALL(cudaMemset(histo, 0, 256 * sizeof(int)));
+
+    histogram(histo, image_buffer, image_size, stream);
+//    std::cout << "Histogram: " << std::endl;
+//    print_array(histo, 256, true);
+
+    // Compute the inclusive sum scan of the histogram
+
+    scan<ScanType::INCLUSIVE>(histo, histo, 256, stream);
+//    std::cout << "Scan: " << std::endl;
+//    print_array(histo, 256, true);
+
+    // Find the first non-zero value in the cumulative histogram
+    int first_none_zero = find_index<FindType::BIGGER>(histo, 256, 0, stream);
+//    std::cout << "First non zero: " << first_none_zero << std::endl;
+
+    // Apply the map transformation of the histogram equalization
+    histogram_equalization(image_buffer, histo, image_size, first_none_zero, stream);
+    std::cout << "Histogram equalization: " << std::endl;
+    print_array(image_buffer, 50, true);
+
+    CUDA_CALL(cudaFree(histo));
+
+    // #4 Copy back to host
+    CUDA_CALL(cudaMemcpy(buffer, image_buffer, image_size * sizeof(int), cudaMemcpyDeviceToDevice));
+    CUDA_CALL(cudaFree(image_buffer));
 }

@@ -48,3 +48,40 @@
 //        CUDA_CALL(cudaFree(output_pow_2));
 //    }
 //}
+
+__device__
+int scan_warp(int* data, const int tid) {
+    const int lane = tid & 31; // index within the warp
+
+    if (lane >= 1) data[tid] += data[tid - 1]; __syncwarp();
+    if (lane >= 2) data[tid] += data[tid - 2]; __syncwarp();
+    if (lane >= 4) data[tid] += data[tid - 4]; __syncwarp();
+    if (lane >= 8) data[tid] += data[tid - 8]; __syncwarp();
+    if (lane >= 16) data[tid] += data[tid - 16]; __syncwarp();
+
+    return data[tid];
+}
+
+
+__device__
+int scan_block(int* data, const int tid) {
+    const int lane = tid & 31;
+    const int warpid = tid >> 5;
+
+    int val = scan_warp(data, tid);
+    __syncthreads();
+
+    if(lane == 31) data[warpid] = data[tid]; __syncthreads();
+
+    if(warpid == 0) {
+        scan_warp(data, tid); __syncthreads();
+        printf("Two first values of the block %d: %d %d\n", blockIdx.x, data[0], data[1]);
+    }
+
+    if (warpid > 0) val += data[warpid - 1]; __syncthreads();
+
+    data[tid] = val;
+    __syncthreads();
+
+    return val;
+}

@@ -155,10 +155,10 @@
 
             images[i] = pipeline.get_image(i);
 
-            CUDA_CALL(cudaMalloc(&d_buffers[i], images[i].width * images[i].height * sizeof(int)));
-            CUDA_CALL(cudaMemcpyAsync(d_buffers[i], images[i].buffer, images[i].width * images[i].height * sizeof(int), cudaMemcpyHostToDevice, streams[stream_id]));
+            CUDA_CALL(cudaMalloc(&d_buffers[i], images[i].size() * sizeof(int)));
+            CUDA_CALL(cudaMemcpyAsync(d_buffers[i], images[i].buffer, images[i].size() * sizeof(int), cudaMemcpyHostToDevice, streams[stream_id]));
 
-            fix_image_gpu(d_buffers[i], images[i].width, images[i].height, &streams[stream_id]);
+            fix_image_gpu(d_buffers[i], images[i].size(), images[i].width * images[i].height, &streams[stream_id]);
 
             CUDA_CALL(cudaMemcpyAsync(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost, streams[stream_id]));
         }
@@ -224,8 +224,10 @@
         for (int i = 0; i < nb_streams; ++i)
             cudaStreamDestroy(streams[i]);
 
-        for (int i = 0; i < nb_images; ++i)
+        for (int i = 0; i < nb_images; ++i) {
+            CUDA_CALL(cudaFree(d_buffers[i]));
             CUDA_CALL(cudaFreeHost(images[i].buffer));
+        }
 
         return 0;
     }

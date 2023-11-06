@@ -6,20 +6,21 @@
 
 
 __global__
-void predicate_kernel(int* predicate, const int* buffer, const int size) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+void predicate_kernel(int* predicate_buffer, const int* buffer, const int size) {
+    const int i = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (i < size)
-        predicate[i] = buffer[i] != -27 ? 1 : 0;
+        predicate_buffer[i] += (buffer[i] != -27);
 }
 
 
 __global__
-void scatter_kernel(int* buffer, const int* predicate, const int size) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+void scatter_kernel(const int* buffer, int* output, const int* predicate, const int size) {
+    const int i = threadIdx.x + blockIdx.x * blockDim.x;
 
-    if (i < size && buffer[i] != -27)
-        buffer[predicate[i]] = buffer[i];
+    if (i < size)
+        if (buffer[i] != -27)
+            output[predicate[i]] = buffer[i];
 }
 
 
@@ -40,15 +41,30 @@ void map_kernel(int* buffer, const int size) {
     }
 }
 
-
+template <FindType F>
 __global__
-void find_if_kernel(int* buffer, predicate_t fct, int* result, const int size) {
-    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+void find_first_value(const int *data, const int size, const int valueToFind, int *result) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-    if (tid < size && fct(buffer[tid])) {
-        int old = atomicCAS(result, -1, tid);
-        if (old != -1)
-            atomicMin(result, tid);
+    if (tid < size) {
+        if constexpr (F == FindType::SMALLER) {
+            if (data[tid] < valueToFind) {
+                if (atomicCAS(result, -1, tid) != -1)
+                    atomicMin(result, tid);
+            }
+        }
+        else if constexpr (F == FindType::EQUAL) {
+            if (data[tid] == valueToFind) {
+                if (atomicCAS(result, -1, tid) != -1)
+                    atomicMin(result, tid);
+            }
+        }
+        else if constexpr (F == FindType::BIGGER) {
+            if (data[tid] > valueToFind) {
+                if (atomicCAS(result, -1, tid) != -1)
+                    atomicMin(result, tid);
+            }
+        }
     }
 }
 
@@ -59,17 +75,17 @@ void predicate(int* predicate, const int* buffer, const int size, cudaStream_t* 
 
     predicate_kernel<<<grid_size, block_size, 0, *stream>>>(predicate, buffer, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 }
 
 
-void scatter(int* buffer, const int* predicate, const int size, cudaStream_t* stream) {
+void scatter(int* buffer, int* output, const int* predicate, const int size, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
-    scatter_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, predicate, size);
+    scatter_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, output, predicate, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 }
 
 
@@ -79,10 +95,11 @@ void map(int* buffer, const int size, cudaStream_t* stream) {
 
     map_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, size);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 }
 
-int find_if(int* buffer, predicate_t fct, const int size, cudaStream_t* stream) {
+template <FindType F>
+int find_index(const int* buffer, const int size, const int value, cudaStream_t* stream) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
@@ -90,12 +107,16 @@ int find_if(int* buffer, predicate_t fct, const int size, cudaStream_t* stream) 
     CUDA_CALL(cudaMallocManaged(&result, sizeof(int)));
     CUDA_CALL(cudaMemset(result, -1, sizeof(int)));
 
-    find_if_kernel<<<grid_size, block_size, 0, *stream>>>(buffer, fct, result, size);
+    find_first_value<F><<<grid_size, block_size, 0, *stream>>>(buffer, size, value, result);
 
-    CUDA_CALL(cudaDeviceSynchronize());
+    CUDA_CALL(cudaStreamSynchronize(*stream));
 
     int res = *result;
     CUDA_CALL(cudaFree(result));
 
     return res;
 }
+
+template int find_index<FindType::SMALLER>(const int*, const int, const int, cudaStream_t*);
+template int find_index<FindType::EQUAL>(const int*, const int, const int, cudaStream_t*);
+template int find_index<FindType::BIGGER>(const int*, const int, const int, cudaStream_t*);
