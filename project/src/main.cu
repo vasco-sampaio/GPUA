@@ -138,10 +138,10 @@
         std::vector<Image> images(nb_images);
 
         // - Init streams
-        const int nb_streams = 4;
+        const int nb_streams = 8;
         cudaStream_t* streams = new cudaStream_t[nb_streams];
         for (int i = 0; i < nb_streams; ++i) {
-            cudaStreamCreate(&streams[i]);
+            cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
         }
 
         std::cout << "Done, starting compute" << std::endl;
@@ -163,10 +163,7 @@
             CUDA_CALL(cudaMemcpyAsync(images[i].buffer, d_buffers[i], images[i].width * images[i].height * sizeof(int), cudaMemcpyDeviceToHost, streams[stream_id]));
         }
 
-        for (int i = 0; i < nb_images; ++i) {
-            int stream_id = i % nb_streams;
-            CUDA_CALL(cudaStreamSynchronize(streams[stream_id]));
-        }
+        CUDA_CALL(cudaDeviceSynchronize());
 
         std::cout << "Done with compute, starting stats" << std::endl;
 

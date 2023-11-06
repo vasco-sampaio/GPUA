@@ -6,13 +6,21 @@
 
 
 __global__
-void histogram_kernel(int* histogram, const int* buffer, const int size) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (i < size)
-        atomicAdd(&histogram[buffer[i]], 1);
+void histogram_kernel(int *histogram, const int *buffer, const int size) {
+    __shared__ int sdata[256];
+    sdata[threadIdx.x] = 0;
+    __syncthreads();
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int offset = blockDim.x * gridDim.x;
+    while (i < size) {
+        if (buffer[i] < 0 || buffer[i] > 255)
+            printf("ERROR: %d\n", buffer[i]);
+        atomicAdd(&sdata[buffer[i]], 1);
+        i += offset;
+    }
+    __syncthreads();
+    atomicAdd(&histogram[threadIdx.x], sdata[threadIdx.x]);
 }
-
 
 __global__
 void histogram_equalization_kernel(int* buffer, const int* histogram, const int size, const int cdf_min_idx) {
@@ -27,7 +35,7 @@ void histogram_equalization_kernel(int* buffer, const int* histogram, const int 
 
 
 void histogram(int* histogram, const int* buffer, const int size, cudaStream_t* stream) {
-    const int block_size = BLOCK_SIZE(size);
+    const int block_size = 256;
     const int grid_size = (size + block_size - 1) / block_size;
 
     CUDA_CALL(cudaMemset(histogram, 0, 256 * sizeof(int)));
