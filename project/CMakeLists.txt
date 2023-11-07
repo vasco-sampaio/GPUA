@@ -31,12 +31,16 @@ set(CMAKE_CUDA_FLAGS "-Xcompiler -fopenmp --extended-lambda --generate-line-info
 #set(CMAKE_CUDA_FLAGS "--ptxas-options=-v --generate-line-info")
 
 add_executable(main src/main.cu
-                    src/fix_gpu.cu
                     src/fix_cpu.cu
+                    src/fix_gpu.cu
+                    src/fix_gpu_industrial.cu
                     src/kernels/scan.cu
                     src/kernels/reduce.cu
                     src/kernels/histogram.cu
-                    src/kernels/filter.cu)
+                    src/kernels/filter.cu
+                    src/CUB_Thrust/compact.cu
+                    src/CUB_Thrust/histogram.cu
+                    src/CUB_Thrust/map.cu)
 
 set_target_properties(main PROPERTIES CUDA_ARCHITECTURES "75")
 

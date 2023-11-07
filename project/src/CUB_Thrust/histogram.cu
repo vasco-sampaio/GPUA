@@ -1,53 +1,38 @@
 #include "histogram.cuh"
 
-#include <thrust/device_vector.h>
+#include <cub/device/device_histogram.cuh>
+#include <cub/device/device_reduce.cuh>
+#include <cub/device/device_scan.cuh>
 #include <thrust/transform.h>
-#include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/iterator/zip_iterator.h>
-#include <iostream>
 
-void computeHistogramEqualization(int* compacted_input, int* equalized_output, int num_elements) {
-    thrust::device_ptr<int> compacted_ptr(compacted_input);
-    thrust::device_ptr<int> equalized_ptr(equalized_output);
+void histogram_equalization(thrust::device_vector<int>& image, thrust::device_vector<int>& histogram)
+{
+    // Compute histogram
+    int* d_image = thrust::raw_pointer_cast(image.data());
+    int* d_histo = thrust::raw_pointer_cast(histogram.data());
+
+    void* d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+
+    int num_items = image.size();
+
+    cub::DeviceHistogram::HistogramEven(d_temp_storage, temp_storage_bytes,
+                                        d_image, d_histo, 256, 0, 255, num_items);
+    cudaMalloc(&d_temp_storage, temp_storage_bytes);
+    cub::DeviceHistogram::HistogramEven(d_temp_storage, temp_storage_bytes,
+                                        d_image, d_histo, 256, 0, 255, num_items);
+
+    // Compute Inclusive Scan
+    cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes,
+                                  d_image, d_histo, 256);
 
 
-    thrust::device_vector<int> histogram(256, 0);
-    thrust::transform(compacted_ptr, compacted_ptr + num_elements, histogram.begin(),
-                      thrust::identity<int>());
+    // Normalize
+    thrust::device_vector<int>::iterator iter;
+    iter = thrust::find_if(histogram.begin(), histogram.end(), IsNotZero());
 
+    NormalizeHistogram normalize(num_items, *iter, d_histo);
+    thrust::transform(thrust::make_counting_iterator(0), thrust::make_counting_iterator(256), histogram.begin(), normalize);
 
-    thrust::inclusive_scan(histogram.begin(), histogram.end(), histogram.begin());
-
-
-    int max_cdf = histogram.back();
-    thrust::transform(histogram.begin(), histogram.end(), histogram.begin(),
-                      NormalizeCDF(max_cdf));
-
-
-    thrust::transform(compacted_ptr, compacted_ptr + num_elements, equalized_ptr,
-                      EqualizeValues(histogram));
+    cudaFree(d_temp_storage);
 }
-
-
-struct NormalizeCDF : public thrust::unary_function<int, int> {
-    int max_cdf;
-    NormalizeCDF(int max_cdf) : max_cdf(max_cdf) {}
-
-    __host__ __device__
-    int operator()(int cdf) const {
-        return (int)((cdf * 255) / max_cdf);
-    }
-};
-
-
-struct EqualizeValues {
-    thrust::device_vector<int> cdf;
-
-    EqualizeValues(thrust::device_vector<int> cdf) : cdf(cdf) {}
-
-    __host__ __device__
-    int operator()(int value) const {
-        return cdf[value];
-    }
-};
