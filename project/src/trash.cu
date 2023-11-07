@@ -115,21 +115,21 @@ void find_first_value(const int *data, const int size, const int valueToFind, in
 
 
 template <FindType F>
-int find_index(const int* buffer, const int size, const int value, cudaStream_t& stream) {
+int find_index(const int* buffer, const int size, const int value) {
     const int block_size = BLOCK_SIZE(size);
     const int grid_size = (size + block_size - 1) / block_size;
 
     int* result;
     CUDA_CALL(cudaMalloc(&result, sizeof(int)));
-    CUDA_CALL(cudaMemsetAsync(result, -1, sizeof(int), stream));
+    CUDA_CALL(cudaMemsetAsync(result, -1, sizeof(int)));
 
-    find_first_value<F><<<grid_size, block_size, 0, stream>>>(buffer, size, value, result);
+    find_first_value<F><<<grid_size, block_size>>>(buffer, size, value, result);
 
     CUDA_CALL(cudaStreamSynchronize(stream));
 
     int *tmp;
     CUDA_CALL(cudaMallocHost(&tmp, sizeof(int)));
-    CUDA_CALL(cudaMemcpyAsync(tmp, result, sizeof(int), cudaMemcpyDeviceToHost, stream));
+    CUDA_CALL(cudaMemcpyAsync(tmp, result, sizeof(int), cudaMemcpyDeviceToHost));
 
     int res = *tmp;
 
@@ -149,3 +149,119 @@ enum class FindType {
     BIGGER
 };
 
+void check_predicate(int* d_buffer, int* d_predicate, int size){
+    std::vector<int> h_buffer(size, 0);
+    cudaMemcpy(h_buffer.data(), d_buffer, size*sizeof(int), cudaMemcpyDeviceToHost);
+    std::vector<int> gpu_predicate(size, 0);
+    cudaMemcpy(gpu_predicate.data(), d_predicate, size*sizeof(int), cudaMemcpyDeviceToHost);
+
+    std::vector<int> cpu_predicate(size, 0);
+    constexpr int garbage_val = -27;
+    int count_garbage = 0;
+    for (int i = 0; i < size; ++i) {
+        if (h_buffer[i] != garbage_val)
+            cpu_predicate[i] = 1;
+        else
+            count_garbage++;
+    }
+
+    printf("cpu_size: %lu, gpu_size: %lu, garbage_count: %d\n", cpu_predicate.size(), gpu_predicate.size(), count_garbage);
+
+    bool same = true;
+    int count = 0;
+    for (int i = 0; i < size; i++){
+        if (cpu_predicate[i] != gpu_predicate[i]){
+            same = false;
+            count++;
+            //printf("index: %d, cpu: %d, gpu: %d\n", i, cpu_predicate[i], gpu_predicate[i]);
+        }
+    }
+
+    if (same)
+        printf("predicate good !\n");
+    else
+        printf("predicate bad !, %d are bad, %i\n", count, (count/size)*100);
+}
+
+void check_scan(int* d_predicate, int* d_scan_result, int size){
+    std::vector<int> h_scan_result(size, 0);
+    cudaMemcpy(h_scan_result.data(), d_scan_result, size*sizeof(int), cudaMemcpyDeviceToHost);
+
+    std::vector<int> h_predicate(size, 0);
+    cudaMemcpy(h_predicate.data(), d_predicate, size * sizeof(int), cudaMemcpyDeviceToHost);
+    std::exclusive_scan(h_predicate.begin(), h_predicate.end(), h_predicate.begin(), 0);
+
+
+    bool same = true;
+    int count = 0;
+    for (int i = 0; i < size; i++){
+        if (h_predicate[i] != h_scan_result[i]){
+            same = false;
+            count++;
+            //printf("index: %d, cpu: %d, gpu: %d\n", i, h_predicate[i], h_scan_result[i]);
+        }
+    }
+
+    if (same)
+        printf("scan good !\n");
+    else
+        printf("scan bad !, %d are bad, %i\n", count, (count/size)*100);
+
+}
+
+void check_scatter(int *my_d_buffer, int *d_buffer, int *d_predicate, int size, int compact_size){
+    std::vector<int> h_buffer(size, 0);
+    cudaMemcpy(h_buffer.data(), d_buffer, size*sizeof(int), cudaMemcpyDeviceToHost);
+    std::vector<int> my_h_buffer(size, 0);
+    cudaMemcpy(my_h_buffer.data(), my_d_buffer, size*sizeof(int), cudaMemcpyDeviceToHost);
+    std::vector<int> h_predicate(size, 0);
+    cudaMemcpy(h_predicate.data(), d_predicate, size*sizeof(int), cudaMemcpyDeviceToHost);
+
+    constexpr int garbage_val = -27;
+    for (std::size_t i = 0; i < size; ++i) {
+        if (h_buffer[i] != garbage_val) {
+            h_buffer[h_predicate[i]] = h_buffer[i];
+        }
+    }
+
+    bool same = true;
+    int count = 0;
+    for (int i = 0; i < size; i++){
+        if (h_buffer[i] != my_h_buffer[i]){
+            same = false;
+            count++;
+            //printf("index: %d, cpu: %d, gpu: %d\n", i, h_buffer[i], my_h_buffer[i]);
+        }
+    }
+
+    if (same)
+        printf("scatter good !\n");
+    else
+        printf("scatter bad !, %d are bad, %f\n", count, ((float)count/size)*100);
+}
+void check_histogram(int* d_histogram, int* d_buffer, int histogram_size, int image_size){
+    std::vector<int> h_histogram(histogram_size, 0);
+    cudaMemcpy(h_histogram.data(), d_histogram, histogram_size*sizeof(int), cudaMemcpyDeviceToHost);
+    std::vector<int> h_buffer(image_size, 0);
+    cudaMemcpy(h_buffer.data(), d_buffer, image_size*sizeof(int), cudaMemcpyDeviceToHost);
+
+    std::array<int, 256> histo;
+    histo.fill(0);
+    for (int i = 0; i < image_size; ++i)
+        ++histo[h_buffer[i]];
+
+    bool same = true;
+    int count = 0;
+    for (int i = 0; i < histogram_size; i++){
+        if (histo[i] != h_histogram[i]){
+            same = false;
+            count++;
+            //printf("index: %d, cpu: %d, gpu: %d\n", i, h_buffer[i], my_h_buffer[i]);
+        }
+    }
+
+    if (same)
+        printf("calculate histogram good !\n");
+    else
+        printf("calculate histogram !, %d are bad, %f\n", count, ((float)count/histogram_size)*100);
+}

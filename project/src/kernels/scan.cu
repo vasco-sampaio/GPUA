@@ -96,15 +96,6 @@ void inclusive_scan_kernel(const int *input, int *output, const int size) {
 
 
 __global__
-void shift_kernel(const int *buffer, int *output, const int size) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-    if (tid < size)
-        output[tid] = (tid == 0) ? 0 : output[tid - 1]; // BUG?
-}
-
-
-__global__
 void single_block_scan_kernel(const int *input, int *output, const int size) {
     extern __shared__ int sdata[];
 
@@ -123,8 +114,7 @@ void single_block_scan_kernel(const int *input, int *output, const int size) {
 }
 
 
-template <ScanType type>
-void scan(int* input, int* output, const int size, cudaStream_t& stream) {
+void scan(int* input, int* output, const int size) {
     int block_size = 256; // 256 because of the shared memory size
     int grid_size = (size + block_size - 1) / block_size;
 
@@ -134,15 +124,7 @@ void scan(int* input, int* output, const int size, cudaStream_t& stream) {
     }
 
     if (grid_size == 1)
-        single_block_scan_kernel<<<1, block_size, block_size * sizeof(int), stream>>>(input, output, size);
+        single_block_scan_kernel<<<1, block_size, block_size * sizeof(int)>>>(input, output, size);
     else
-        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), stream>>>(input, output, size);
-
-    if (ScanType::EXCLUSIVE == type)
-        shift_kernel<<<grid_size, block_size, 0, stream>>>(input, output, size);
-
+        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, size);
 }
-
-
-template void scan<ScanType::EXCLUSIVE>(int* input, int* output, const int size, cudaStream_t& stream);
-template void scan<ScanType::INCLUSIVE>(int* input, int* output, const int size, cudaStream_t& stream);

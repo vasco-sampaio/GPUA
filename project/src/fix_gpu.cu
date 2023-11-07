@@ -1,49 +1,78 @@
 #include "fix_gpu.cuh"
 
-#include "cuda_streams.cuh"
 #include "kernels/filter.cuh"
-#include "kernels/histogram.cuh"
 #include "kernels/scan.cuh"
-#include "kernels/utils.cuh"
+
+#include <array>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
 
 
-void fix_image_gpu(Image& image, cudaStream_t& stream) {
+void fix_image_gpu(Image& image) {
     const int image_size = image.width * image.height;
     const int buffer_size = image.size();
 
     int* d_buffer;
     int* d_predicate_buffer;
-    int* d_histo;
 
-    CUDA_CALL(cudaMalloc(&d_buffer, buffer_size * sizeof(int)));
-    CUDA_CALL(cudaMalloc(&d_predicate_buffer, buffer_size * sizeof(int)));
+    cudaMalloc(&d_buffer, buffer_size * sizeof(int));
+    cudaMalloc(&d_predicate_buffer, buffer_size * sizeof(int));
 
-    CUDA_CALL(cudaMemcpyAsync(d_buffer, image.buffer, buffer_size * sizeof(int), cudaMemcpyHostToDevice, stream));
-    CUDA_CALL(cudaMemsetAsync(d_predicate_buffer, 0, buffer_size * sizeof(int), stream));
+    cudaMemcpy(d_buffer, image.buffer, buffer_size * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemset(d_predicate_buffer, 0, buffer_size * sizeof(int));
 
-    predicate(d_predicate_buffer, d_buffer, buffer_size, stream);
-    scan<ScanType::EXCLUSIVE>(d_predicate_buffer, d_predicate_buffer, buffer_size, stream);
-    scatter(d_buffer, d_buffer, d_predicate_buffer, buffer_size, stream);
+    predicate(d_predicate_buffer, d_buffer, buffer_size);
+    scan(d_predicate_buffer, d_predicate_buffer, buffer_size);
+
+    cudaFree(d_buffer);
+
+    int host_predicate[buffer_size];
+    cudaMemcpy(host_predicate, d_predicate_buffer, buffer_size * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaFree(d_predicate_buffer);
+
+    for (std::size_t i = 0; i < buffer_size; ++i)
+        if (image.buffer[i] != -27)
+            image.buffer[host_predicate[i]] = image.buffer[i];
+
+
+    for (int i = 0; i < image_size; ++i)
+    {
+        if (i % 4 == 0)
+            image.buffer[i] += 1;
+        else if (i % 4 == 1)
+            image.buffer[i] -= 5;
+        else if (i % 4 == 2)
+            image.buffer[i] += 3;
+        else if (i % 4 == 3)
+            image.buffer[i] -= 8;
+    }
+
+    // #3 Histogram equalization
+
+    // Histogram
+
+    std::array<int, 256> histo;
+    histo.fill(0);
+    for (int i = 0; i < image_size; ++i)
+        ++histo[image.buffer[i]];
+
+    // Compute the inclusive sum scan of the histogram
+
+    std::inclusive_scan(histo.begin(), histo.end(), histo.begin());
+
+    // Find the first non-zero value in the cumulative histogram
+
+    auto first_none_zero = std::find_if(histo.begin(), histo.end(), [](auto v) { return v != 0; });
     
-    CUDA_CALL(cudaFree(d_predicate_buffer)); // stuck here
+    const int cdf_min = *first_none_zero;
 
+    // Apply the map transformation of the histogram equalization
 
-    map(d_buffer, image_size, stream);
-
-    CUDA_CALL(cudaMalloc(&d_histo, 256 * sizeof(int)));
-    CUDA_CALL(cudaMemsetAsync(d_histo, 0, 256 * sizeof(int), stream));
-
-    histogram(d_histo, d_buffer, image_size, stream);
-    scan<ScanType::INCLUSIVE>(d_histo, d_histo, 256, stream);
-
-    int host_histo[256];
-    CUDA_CALL(cudaMemcpyAsync(host_histo, d_histo, 256 * sizeof(int), cudaMemcpyDeviceToHost, stream));
-
-    int* first_non_zero = std::find_if(host_histo, host_histo + 256, [](int val) { return val != 0; });
-    histogram_equalization(d_buffer, d_histo, image_size, *first_non_zero, stream);
-
-    CUDA_CALL(cudaMemcpyAsync(image.buffer, d_buffer, image_size * sizeof(int), cudaMemcpyDeviceToHost, stream));
-
-    CUDA_CALL(cudaFree(d_buffer));
-    CUDA_CALL(cudaFree(d_histo));
+    std::transform(image.buffer, image.buffer + image_size, image.buffer,
+                   [image_size, cdf_min, &histo](int pixel)
+                   {
+                       return std::roundf(((histo[pixel] - cdf_min) / static_cast<float>(image_size - cdf_min)) * 255.0f);
+                   }
+    );
 }
