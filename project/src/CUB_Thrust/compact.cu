@@ -1,6 +1,6 @@
 #include "compact.cuh"
 
-#include <cub/device/device_select.cuh>
+#include <cub/cub.cuh>
 
 
 struct is_positive

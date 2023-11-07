@@ -1,6 +1,6 @@
 #include "map.cuh"
 
-#include <cub/device/device_transform.cuh>
+#include <cub/cub.cuh>
 
 
 void modify_buffer(thrust::device_vector<int>& input, thrust::device_vector<int>& output)
