@@ -85,3 +85,67 @@ int scan_block(int* data, const int tid) {
 
     return val;
 }
+
+template <FindType F>
+__global__
+void find_first_value(const int *data, const int size, const int valueToFind, int *result) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (tid < size) {
+        if constexpr (F == FindType::SMALLER) {
+            if (data[tid] < valueToFind) {
+                if (atomicCAS(result, -1, tid) != -1)
+                    atomicMin(result, tid);
+            }
+        }
+        else if constexpr (F == FindType::EQUAL) {
+            if (data[tid] == valueToFind) {
+                if (atomicCAS(result, -1, tid) != -1)
+                    atomicMin(result, tid);
+            }
+        }
+        else if constexpr (F == FindType::BIGGER) {
+            if (data[tid] > valueToFind) {
+                if (atomicCAS(result, -1, tid) != -1)
+                    atomicMin(result, tid);
+            }
+        }
+    }
+}
+
+
+template <FindType F>
+int find_index(const int* buffer, const int size, const int value, cudaStream_t& stream) {
+    const int block_size = BLOCK_SIZE(size);
+    const int grid_size = (size + block_size - 1) / block_size;
+
+    int* result;
+    CUDA_CALL(cudaMalloc(&result, sizeof(int)));
+    CUDA_CALL(cudaMemsetAsync(result, -1, sizeof(int), stream));
+
+    find_first_value<F><<<grid_size, block_size, 0, stream>>>(buffer, size, value, result);
+
+    CUDA_CALL(cudaStreamSynchronize(stream));
+
+    int *tmp;
+    CUDA_CALL(cudaMallocHost(&tmp, sizeof(int)));
+    CUDA_CALL(cudaMemcpyAsync(tmp, result, sizeof(int), cudaMemcpyDeviceToHost, stream));
+
+    int res = *tmp;
+
+    CUDA_CALL(cudaFreeHost(tmp));
+    CUDA_CALL(cudaFree(result));
+
+    return res;
+}
+
+template int find_index<FindType::SMALLER>(const int*, const int, const int, cudaStream_t&);
+template int find_index<FindType::EQUAL>(const int*, const int, const int, cudaStream_t&);
+template int find_index<FindType::BIGGER>(const int*, const int, const int, cudaStream_t&);
+
+enum class FindType {
+    SMALLER,
+    EQUAL,
+    BIGGER
+};
+

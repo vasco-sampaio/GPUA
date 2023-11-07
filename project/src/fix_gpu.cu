@@ -18,19 +18,16 @@ void fix_image_gpu(Image& image, cudaStream_t& stream) {
     CUDA_CALL(cudaMalloc(&d_buffer, buffer_size * sizeof(int)));
     CUDA_CALL(cudaMalloc(&d_predicate_buffer, buffer_size * sizeof(int)));
 
-    CUDA_CALL(cudaMemcpyAsync(d_buffer, image.buffer, buffer_size, cudaMemcpyHostToDevice, stream));
+    CUDA_CALL(cudaMemcpyAsync(d_buffer, image.buffer, buffer_size * sizeof(int), cudaMemcpyHostToDevice, stream));
+    CUDA_CALL(cudaMemsetAsync(d_predicate_buffer, 0, buffer_size * sizeof(int), stream));
 
     predicate(d_predicate_buffer, d_buffer, buffer_size, stream);
-
     scan<ScanType::EXCLUSIVE>(d_predicate_buffer, d_predicate_buffer, buffer_size, stream);
-    printf("Scan done\n");
-
     scatter(d_buffer, d_buffer, d_predicate_buffer, buffer_size, stream);
-    printf("Scatter done\n");
     
     CUDA_CALL(cudaFree(d_predicate_buffer)); // stuck here
 
-    printf("Map\n");
+
     map(d_buffer, image_size, stream);
 
     CUDA_CALL(cudaMalloc(&d_histo, 256 * sizeof(int)));
@@ -39,8 +36,11 @@ void fix_image_gpu(Image& image, cudaStream_t& stream) {
     histogram(d_histo, d_buffer, image_size, stream);
     scan<ScanType::INCLUSIVE>(d_histo, d_histo, 256, stream);
 
-    int first_non_zero = find_index<FindType::BIGGER>(d_histo, 256, 0, stream);
-    histogram_equalization(d_buffer, d_histo, image_size, first_non_zero, stream);
+    int host_histo[256];
+    CUDA_CALL(cudaMemcpyAsync(host_histo, d_histo, 256 * sizeof(int), cudaMemcpyDeviceToHost, stream));
+
+    int* first_non_zero = std::find_if(host_histo, host_histo + 256, [](int val) { return val != 0; });
+    histogram_equalization(d_buffer, d_histo, image_size, *first_non_zero, stream);
 
     CUDA_CALL(cudaMemcpyAsync(image.buffer, d_buffer, image_size * sizeof(int), cudaMemcpyDeviceToHost, stream));
 

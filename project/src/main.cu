@@ -126,6 +126,7 @@
         for (const auto& dir_entry : recursive_directory_iterator("/afs/cri.epita.fr/resources/teach/IRGPUA/images"))
             filepaths.emplace_back(dir_entry.path());
 
+
         // - Init pipeline object
 
         Pipeline pipeline(filepaths);
@@ -145,7 +146,7 @@
             cudaStream_t stream = 0; // getStream(i % NUM_STREAMS);
             images[i] = pipeline.get_image(i);
             fix_image_gpu(images[i], stream);
-            // cudaStreamSynchronize(stream);
+            cudaStreamSynchronize(stream);
         }
 
         std::cout << "Done with compute, starting stats" << std::endl;

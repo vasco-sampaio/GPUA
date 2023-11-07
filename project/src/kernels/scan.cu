@@ -5,7 +5,7 @@
 
 #include "utils.cuh"
 
-__device__
+/*__device__
 int scan_warp(int* data, const int tid) {
     const int lane = tid & 31; // index within the warp
 
@@ -14,6 +14,20 @@ int scan_warp(int* data, const int tid) {
     if (lane >= 4) data[tid] += data[tid - 4]; __syncwarp();
     if (lane >= 8) data[tid] += data[tid - 8]; __syncwarp();
     if (lane >= 16) data[tid] += data[tid - 16]; __syncwarp();
+
+    return data[tid];
+} */
+
+__device__
+inline int scan_warp(int* data, const int tid) {
+    const int lane = tid & 31; // index within the warp
+    int tmp;
+
+    #pragma unroll
+    for (int i = 1; i <= 32; i *= 2) {
+        tmp = __shfl_up_sync(0xffffffff, data[tid], i);
+        if (lane >= i) data[tid] += tmp;
+    }
 
     return data[tid];
 }
@@ -71,7 +85,7 @@ void inclusive_scan_kernel(const int *input, int *output, const int size) {
     if (bid > 0 && tid == 0) {
         while (blocks_executed < bid);
         global_sum = output[(bid - 1) * blockDim.x + blockDim.x - 1];
-        __threadfence_system();
+        __threadfence();
     }
     __syncthreads();
 
