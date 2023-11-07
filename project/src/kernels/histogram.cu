@@ -35,7 +35,7 @@ void histogram(int* histogram, const int* buffer, const int size, cudaStream_t& 
     const int block_size = 256;
     const int grid_size = (size + block_size - 1) / block_size;
 
-    CUDA_CALL(cudaMemset(histogram, 0, 256 * sizeof(int)));
+    CUDA_CALL(cudaMemsetAsync(histogram, 0, 256 * sizeof(int), stream));
 
     histogram_kernel<<<grid_size, block_size, 0, stream>>>(histogram, buffer, size);
 
