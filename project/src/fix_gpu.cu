@@ -9,6 +9,26 @@
 #include <cmath>
 
 
+void check_scan_predicate(int* d_predicate, int* buffer, const int size) {
+    std::vector<int> predicate(size, 0);
+
+    constexpr int garbage_val = -27;
+    for (int i = 0; i < size; ++i)
+        if (buffer[i] != garbage_val)
+            predicate[i] = 1;
+
+    std::exclusive_scan(predicate.begin(), predicate.end(), predicate.begin(), 0);
+
+    for (int i = 1; i < size; i++) {
+        if (predicate[i] != d_predicate[i - 1]) {
+            std::cerr << "Error at index " << i << std::endl;
+            std::cerr << "Expected " << predicate[i] << " but got " << d_predicate[i] << std::endl;
+            exit(1);
+        }
+    }
+}
+
+
 void fix_image_gpu(Image& image) {
     const int image_size = image.width * image.height;
     const int buffer_size = image.size();
@@ -27,17 +47,22 @@ void fix_image_gpu(Image& image) {
 
     cudaFree(d_buffer);
 
-    int host_predicate[buffer_size];
+    int* host_predicate = new int[buffer_size];
     cudaMemcpy(host_predicate, d_predicate_buffer, buffer_size * sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_predicate_buffer);
 
-    for (std::size_t i = 0; i < buffer_size; ++i)
+    check_scan_predicate(host_predicate, image.buffer, buffer_size);
+
+    for (int i = 0; i < buffer_size; ++i) {
         if (image.buffer[i] != -27)
-            image.buffer[host_predicate[i]] = image.buffer[i];
+            image.buffer[host_predicate[i] - 1] = image.buffer[i];
+    }
 
+    delete[] host_predicate;
 
-    for (int i = 0; i < image_size; ++i)
-    {
+    // #2 Map to fix pixels
+
+    for (int i = 0; i < image_size; ++i) {
         if (i % 4 == 0)
             image.buffer[i] += 1;
         else if (i % 4 == 1)
@@ -47,6 +72,7 @@ void fix_image_gpu(Image& image) {
         else if (i % 4 == 3)
             image.buffer[i] -= 8;
     }
+
 
     // #3 Histogram equalization
 

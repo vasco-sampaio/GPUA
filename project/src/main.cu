@@ -38,7 +38,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     std::cout << "Done, starting compute" << std::endl;
 
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < nb_images; ++i)
     {
         // TODO : make it GPU compatible (aka faster)
@@ -53,8 +53,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
             fix_image_cpu(images[i]);
         #elif MODE == 1
             fix_image_gpu(images[i]);
-        #else
-            #error "MODE must be 1 or 2"
         #endif
     }
 
@@ -109,8 +107,13 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     // Cleaning
     // TODO : Don't forget to update this if you change allocation style
-    for (int i = 0; i < nb_images; ++i)
-        free(images[i].buffer);
+    for (int i = 0; i < nb_images; ++i) {
+        #if MODE == 0
+            free(images[i].buffer);
+        #else
+            cudaFreeHost(images[i].buffer);
+        #endif
+    }
 
     return 0;
 }

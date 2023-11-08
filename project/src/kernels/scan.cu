@@ -5,18 +5,6 @@
 
 #include "utils.cuh"
 
-/*__device__
-int scan_warp(int* data, const int tid) {
-    const int lane = tid & 31; // index within the warp
-
-    if (lane >= 1) data[tid] += data[tid - 1]; __syncwarp();
-    if (lane >= 2) data[tid] += data[tid - 2]; __syncwarp();
-    if (lane >= 4) data[tid] += data[tid - 4]; __syncwarp();
-    if (lane >= 8) data[tid] += data[tid - 8]; __syncwarp();
-    if (lane >= 16) data[tid] += data[tid - 16]; __syncwarp();
-
-    return data[tid];
-} */
 
 __device__
 inline int scan_warp(int* data, const int tid) {
@@ -55,11 +43,8 @@ int scan_block(int* data, const int tid) {
 }
 
 
-__device__ int block_count = 0;
-__device__ volatile int blocks_executed = 0;
-
 __global__
-void inclusive_scan_kernel(const int *input, int *output, const int size) {
+void inclusive_scan_kernel(const int *input, int *output, const int size, int* block_count, cuda::std::atomic<int>* blocks_executed) {
     __shared__ int bid;
     __shared__ int global_sum;
     extern __shared__ int sdata[];
@@ -67,7 +52,7 @@ void inclusive_scan_kernel(const int *input, int *output, const int size) {
     const int tid = threadIdx.x;
 
     if (tid == 0)
-        bid = atomicAdd(&block_count, 1);
+        bid = atomicAdd(block_count, 1);
     __syncthreads();
 
     if (bid * blockDim.x + tid >= size)
@@ -83,15 +68,14 @@ void inclusive_scan_kernel(const int *input, int *output, const int size) {
     __syncthreads();
 
     if (bid > 0 && tid == 0) {
-        while (blocks_executed < bid);
+        while (blocks_executed->load() < bid);
         global_sum = output[(bid - 1) * blockDim.x + blockDim.x - 1];
-        __threadfence();
     }
     __syncthreads();
 
-    output[bid * blockDim.x + tid] = val + global_sum;
+    output[bid * blockDim.x + tid] = val + (bid > 0 ? global_sum : 0);
     if (tid == blockDim.x - 1)
-        ++blocks_executed;
+        blocks_executed->fetch_add(1);
 }
 
 
@@ -125,6 +109,15 @@ void scan(int* input, int* output, const int size) {
 
     if (grid_size == 1)
         single_block_scan_kernel<<<1, block_size, block_size * sizeof(int)>>>(input, output, size);
-    else
-        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, size);
+    else {
+        int* block_count;
+        cuda::std::atomic<int>* blocks_executed;
+        cudaMalloc(&block_count, sizeof(int));
+        cudaMalloc(&blocks_executed, sizeof(cuda::std::atomic<int>));
+        cudaMemset(block_count, 0, sizeof(int));
+        cudaMemset(blocks_executed, 0, sizeof(cuda::std::atomic<int>));
+        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, size, block_count, blocks_executed);
+        cudaFree(block_count);
+        cudaFree(blocks_executed);
+    }
 }
