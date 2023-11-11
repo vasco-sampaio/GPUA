@@ -1,48 +1,61 @@
 #include "fix_gpu.cuh"
 
-#include <array>
-#include <numeric>
-#include <algorithm>
-#include <cmath>
-#include <iostream>
-
-#include "kernels/scan.cuh"
 #include "kernels/filter.cuh"
+#include "kernels/scan.cuh"
 #include "kernels/histogram.cuh"
+#include "kernels/reduce.cuh"
 
-void print_buffer(int* buffer, const int size, bool copy)
-{
-    if (copy)
-    {
-        int* host_buffer = new int[size];
-        cudaMemcpy(host_buffer, buffer, size * sizeof(int), cudaMemcpyDeviceToHost);
-        buffer = host_buffer;
-    }
-    std::cout << "[";
-    for (int i = 0; i < size; i++)
-        std::cout << buffer[i] << ", ";
-    std::cout << "]" << std::endl;
-}
+void fix_image_gpu(Image& image, cudaStream_t& stream) {
+    const int image_size = image.width * image.height;
+    const int buffer_size = image.size();
+
+    int* d_buffer;
+    int* d_predicate_buffer;
+
+    CUDA_CALL(cudaMalloc(&d_buffer, buffer_size * sizeof(int)));
+    CUDA_CALL(cudaMalloc(&d_predicate_buffer, buffer_size * sizeof(int)));
+
+    CUDA_CALL(cudaMemcpyAsync(d_buffer, image.buffer, buffer_size * sizeof(int), cudaMemcpyHostToDevice, stream));
+    CUDA_CALL(cudaMemsetAsync(d_predicate_buffer, 0, buffer_size * sizeof(int), stream));
+
+    // #1 Compact
+
+    predicate(d_predicate_buffer, d_buffer, buffer_size, stream);
+    scan(d_predicate_buffer, d_predicate_buffer, buffer_size, stream);
+
+    scatter(d_buffer, d_buffer, d_predicate_buffer, buffer_size, stream);
+
+    CUDA_CALL(cudaFree(d_predicate_buffer));
 
 
-void fix_image_gpu(int* buffer, const int buffer_size, const int image_size)
-{
-    int* predicate_buffer;
-    cudaMalloc(&predicate_buffer, buffer_size * sizeof(int));
-    cudaMemset(predicate_buffer, 0, buffer_size * sizeof(int));
+    // #2 Map to fix pixels
 
-    predicate(predicate_buffer, buffer, buffer_size);
+    map(d_buffer, image_size, stream);
 
-    scan<ScanType::EXCLUSIVE>(predicate_buffer, predicate_buffer, buffer_size);
 
-    int* image_buffer;
-    cudaMalloc(&image_buffer, image_size * sizeof(int));
+    // #3 Histogram equalization
 
-    scatter(buffer, image_buffer, predicate_buffer, buffer_size);
+    // Histogram
 
-    print_buffer(image_buffer, 50, true);
+    int *d_histo;
+    CUDA_CALL(cudaMalloc(&d_histo, 256 * sizeof(int)));
+    CUDA_CALL(cudaMemsetAsync(d_histo, 0, 256 * sizeof(int), stream));
 
-    cudaFree(predicate_buffer);
-    cudaMemcpy(buffer, image_buffer, image_size * sizeof(int), cudaMemcpyDeviceToDevice);
-    cudaFree(image_buffer);
+    const int cdf_min_idx = histogram(d_histo, d_buffer, image_size, stream);
+
+    // Compute the inclusive sum scan of the histogram
+
+    scan(d_histo, d_histo, 256, stream);
+
+    // Apply the map transformation of the histogram equalization
+
+    histogram_equalization(d_buffer, d_histo, image_size, cdf_min_idx, stream);
+
+    CUDA_CALL(cudaMemcpyAsync(image.buffer, d_buffer, image_size * sizeof(int), cudaMemcpyDeviceToHost, stream));
+    CUDA_CALL(cudaFree(d_histo));
+
+    // #4 Compute total (buffer is already on the device)
+    image.to_sort.total = reduce(d_buffer, image_size, stream);
+
+    CUDA_CALL(cudaFree(d_buffer));
 }

@@ -1,106 +1,53 @@
 #include "reduce.cuh"
 
-#include "utils.h"
+#include "../utils.cuh"
 
 
-template<int BLOCK_SIZE>
 __device__
-void warpReduce(int* sdata, const int tid) {
-    if constexpr (BLOCK_SIZE >= 64) sdata[tid] += sdata[tid + 32]; __syncwarp();
-    if constexpr (BLOCK_SIZE >= 32) sdata[tid] += sdata[tid + 16]; __syncwarp();
-    if constexpr (BLOCK_SIZE >= 16) sdata[tid] += sdata[tid + 8]; __syncwarp();
-    if constexpr (BLOCK_SIZE >= 8) sdata[tid] += sdata[tid + 4]; __syncwarp();
-    if constexpr (BLOCK_SIZE >= 4) sdata[tid] += sdata[tid + 2]; __syncwarp();
-    if constexpr (BLOCK_SIZE >= 2) sdata[tid] += sdata[tid + 1]; __syncwarp();
+inline int warpReduce(int val) {
+    #pragma unroll
+    for (int offset = warpSize / 2; offset > 0; offset >>= 1)
+        val += __shfl_down_sync(0xffffffff, val, offset);
+    return val;
 }
 
 
-template <int BLOCK_SIZE>
 __global__
-void reduce_kernel(const int* __restrict__ buffer, int* __restrict__ total)
+void reduce_kernel(const int* __restrict__ buffer, int* __restrict__ total, const int size)
 {
     extern __shared__ int sdata[];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int gridSize = blockDim.x * gridDim.x;
 
-    sdata[tid] = buffer[i]+ buffer[i + blockDim.x];
+    sdata[tid] = 0;
+    while (i < size) {
+        sdata[tid] += buffer[i];
+        i += gridSize;
+    }
     __syncthreads();
 
-    if constexpr (BLOCK_SIZE == 1024) {
-        if (tid < 512)
-            sdata[tid] += sdata[tid + 512];
-        __syncthreads();
-    }
+    int val = warpReduce(sdata[tid]);
 
-    if constexpr (BLOCK_SIZE >= 512) {
-        if (tid < 256)
-            sdata[tid] += sdata[tid + 256];
-        __syncthreads();
-    }
-
-    if constexpr (BLOCK_SIZE >= 256) {
-        if (tid < 128)
-            sdata[tid] += sdata[tid + 128];
-        __syncthreads();
-    }
-
-    if constexpr (BLOCK_SIZE >= 128) {
-        if (tid < 64)
-            sdata[tid] += sdata[tid + 64];
-        __syncthreads();
-    }
-
-    if (tid < 32) warpReduce<BLOCK_SIZE>(sdata, tid);
-
-    if (tid == 0)
-        total[blockIdx.x] = sdata[0];
+    if (tid % warpSize == 0)
+        atomicAdd(total, val);
 }
 
-
-void reduce(int* input, int* output, const int size)
+int reduce(int* input, const int size, cudaStream_t& stream)
 {
-    const int blockSize = BLOCK_SIZE(size);
+    const int blockSize = 256;
     const int gridSize = (size + blockSize - 1) / (blockSize * 2);
 
-    int *tmp;
-    cudaMalloc(&tmp, gridSize * sizeof(int));
+    int* output;
+    CUDA_CALL(cudaMalloc(&output, sizeof(int)));
+    CUDA_CALL(cudaMemsetAsync(output, 0, sizeof(int), stream));
 
-    reduce_kernel<1024><<<gridSize, blockSize, sizeof(int) * blockSize>>>(input, tmp);
-    
-    switch(gridSize / 2) {
-        case 1024:
-            reduce_kernel<1024><<<1, 1024, sizeof(int) * 1024>>>(tmp, output);
-            break;
-        case 512:
-            reduce_kernel<512><<<1, 512, sizeof(int) * 512>>>(tmp, output);
-            break;
-        case 256:
-            reduce_kernel<256><<<1, 256, sizeof(int) * 256>>>(tmp, output);
-            break;
-        case 128:
-            reduce_kernel<128><<<1, 128, sizeof(int) * 128>>>(tmp, output);
-            break;
-        case 64:
-            reduce_kernel<64><<<1, 64, sizeof(int) * 64>>>(tmp, output);
-            break;
-        case 32:
-            reduce_kernel<32><<<1, 32, sizeof(int) * 32>>>(tmp, output);
-            break;
-        case 16:
-            reduce_kernel<16><<<1, 16, sizeof(int) * 16>>>(tmp, output);
-            break;
-        case 8:
-            reduce_kernel<8><<<1, 8, sizeof(int) * 8>>>(tmp, output);
-            break;
-        case 4:
-            reduce_kernel<4><<<1, 4, sizeof(int) * 4>>>(tmp, output);
-            break;
-        case 2:
-            reduce_kernel<2><<<1, 2, sizeof(int) * 2>>>(tmp, output);
-            break;
-        case 1:
-            reduce_kernel<1><<<1, 1, sizeof(int) * 1>>>(tmp, output);
-            break;
-    }
+    reduce_kernel<<<gridSize, blockSize, sizeof(int) * blockSize, stream>>>(input, output, size);
+
+    int total;
+    CUDA_CALL(cudaMemcpyAsync(&total, output, sizeof(int), cudaMemcpyDeviceToHost, stream));
+    CUDA_CALL(cudaFree(output));
+
+    return total;
 }

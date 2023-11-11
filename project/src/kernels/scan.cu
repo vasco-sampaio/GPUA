@@ -3,17 +3,19 @@
 #include <cuda_runtime.h>
 #include <cuda/atomic>
 
-#include "utils.h"
+#include "../utils.cuh"
+
 
 __device__
-int scan_warp(int* data, const int tid) {
+inline int scan_warp(int* data, const int tid) {
     const int lane = tid & 31; // index within the warp
+    int tmp;
 
-    if (lane >= 1) data[tid] += data[tid - 1]; __syncwarp();
-    if (lane >= 2) data[tid] += data[tid - 2]; __syncwarp();
-    if (lane >= 4) data[tid] += data[tid - 4]; __syncwarp();
-    if (lane >= 8) data[tid] += data[tid - 8]; __syncwarp();
-    if (lane >= 16) data[tid] += data[tid - 16]; __syncwarp();
+    #pragma unroll
+    for (int i = 1; i <= 32; i *= 2) {
+        tmp = __shfl_up_sync(0xffffffff, data[tid], i);
+        if (lane >= i) data[tid] += tmp;
+    }
 
     return data[tid];
 }
@@ -28,7 +30,10 @@ int scan_block(int* data, const int tid) {
     __syncthreads();
 
     if(lane == 31) data[warpid] = data[tid]; __syncthreads();
-    if(warpid == 0) scan_warp(data, tid); __syncthreads();
+
+    if(warpid == 0)
+        scan_warp(data, tid); __syncthreads();
+
     if (warpid > 0) val += data[warpid - 1]; __syncthreads();
 
     data[tid] = val;
@@ -37,77 +42,87 @@ int scan_block(int* data, const int tid) {
     return val;
 }
 
-
-__device__ int block_count = 0;
-
+// using volatile instead of cuda::std::atomic<int> fixed synccheck error
 __global__
-void inclusive_scan_kernel(const int *input, int *output, cuda::std::atomic<char> *flags, const int size) {
+void inclusive_scan_kernel(const int *input, int *output, const int size, int* block_count, /*cuda::std::atomic<int>**/ volatile int* blocks_executed) {
     __shared__ int bid;
     __shared__ int global_sum;
     extern __shared__ int sdata[];
 
     const int tid = threadIdx.x;
 
-    if (tid == 0)
-        bid = atomicAdd(&block_count, 1);
+    if (tid == 0) {
+        bid = atomicAdd(block_count, 1);
+        global_sum = 0;
+    }
     __syncthreads();
 
     if (bid * blockDim.x + tid >= size)
         return;
 
-    int thread_value = input[bid * blockDim.x + tid];
-    sdata[tid] = thread_value;
+    sdata[tid] = input[bid * blockDim.x + tid];
     __syncthreads();
 
     int val = scan_block(sdata, tid);
+
+    if (tid == blockDim.x - 1)
+        output[bid * blockDim.x + tid] = val;
     __syncthreads();
 
-    if (tid == size < blockDim.x ? size - 1 : blockDim.x - 1) {
-        output[bid * blockDim.x + tid] = val;
-        if (bid == 0)
-            flags[0].store(1);
-    }
-
     if (bid > 0 && tid == 0) {
-        while (flags[bid - 1].load() == 0);
+        while (*blocks_executed/*->load()*/ < bid);
         global_sum = output[(bid - 1) * blockDim.x + blockDim.x - 1];
     }
     __syncthreads();
 
     output[bid * blockDim.x + tid] = val + global_sum;
-    __syncthreads();
-    if (tid == 0)
-        flags[bid].store(1);
+    if (tid == blockDim.x - 1)
+        (*blocks_executed)++/*->fetch_add(1)*/;
 }
 
 
 __global__
-void exclusive_scan_kernel(const int *input, int* output, const int size) {
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+void single_block_scan_kernel(const int *input, int *output, const int size) {
+    extern __shared__ int sdata[];
 
-    if (tid < size)
-        output[tid] -= input[tid];
+    const int tid = threadIdx.x;
+
+    if (tid >= size)
+        return;
+
+    sdata[tid] = input[tid];
+    __syncthreads();
+
+    int val = scan_block(sdata, tid);
+    __syncthreads();
+
+    output[tid] = val;
 }
 
-template <ScanType T>
-void scan(int* input, int* output, const int size) {
-    int block_size = BLOCK_SIZE(size);
+
+void scan(int* input, int* output, const int size, cudaStream_t& stream) {
+    int block_size = 256; // 256 because of the shared memory size
     int grid_size = (size + block_size - 1) / block_size;
 
-    cuda::std::atomic<char>* flags;
+    if (grid_size == 0) {
+        block_size = NEXT_POW_2(size);
+        grid_size = 1;
+    }
 
-    cudaMalloc(&flags, grid_size * sizeof(cuda::std::atomic<char>));
-    cudaMemset(flags, 0, grid_size * sizeof(cuda::std::atomic<char>));
-
-    inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int)>>>(input, output, flags, size);
-
-    if (T == EXCLUSIVE)
-        exclusive_scan_kernel<<<grid_size, block_size, 0>>>(input, output, size);
-
-    cudaFree(flags);
-
-    cudaDeviceSynchronize();
+    if (grid_size == 1)
+        single_block_scan_kernel<<<1, block_size, block_size * sizeof(int), stream>>>(input, output, size);
+    else {
+        int* block_count;
+        int* blocks_executed;
+        // cuda::std::atomic<int>* blocks_executed;
+        CUDA_CALL(cudaMalloc(&block_count, sizeof(int)));
+        // cudaMalloc(&blocks_executed, sizeof(cuda::std::atomic<int>));
+        CUDA_CALL(cudaMalloc(&blocks_executed, sizeof(int)));
+        CUDA_CALL(cudaMemsetAsync(block_count, 0, sizeof(int), stream));
+        // cudaMemsetAsync(blocks_executed, 0, sizeof(cuda::std::atomic<int>), stream);
+        CUDA_CALL(cudaMemsetAsync(blocks_executed, 0, sizeof(int), stream));
+        inclusive_scan_kernel<<<grid_size, block_size, block_size * sizeof(int), stream>>>(input, output, size, block_count, blocks_executed);
+        CUDA_CALL(cudaFree(block_count));
+        CUDA_CALL(cudaFree(blocks_executed));
+    }
 }
-
-template void scan<EXCLUSIVE>(int* input, int* output, const int size);
-template void scan<INCLUSIVE>(int* input, int* output, const int size);

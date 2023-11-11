@@ -1,3 +1,3 @@
 #pragma once
 
-void reduce(int* input, int* output, const int size);
+int reduce(int* input, const int size, cudaStream_t& stream);
