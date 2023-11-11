@@ -1,21 +1,29 @@
 #include "map.cuh"
 
-#include <cub/cub.cuh>
+#include <thrust/transform.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/device_ptr.h>
 
 
-void modify_buffer(thrust::device_vector<int>& input, thrust::device_vector<int>& output)
-{
-    int* d_input = thrust::raw_pointer_cast(input.data());
-    int* d_output = thrust::raw_pointer_cast(output.data());
+struct PixelModificator {
+    __host__ __device__
+    int operator()(const int& x, const int& i) const {
+        if (i % 4 == 0) return x + 1;
+        else if (i % 4 == 1) return x - 5;
+        else if (i % 4 == 2) return x + 3;
+        else if (i % 4 == 3) return x - 8;
+        else return x;
+    }
+};
 
-    int num_items = input.size();
 
-    void* d_temp_storage = NULL;
-    size_t temp_storage_bytes = 0;
+void modify_buffer(int* d_input, int* d_output, const int size) {
+    thrust::device_ptr<int> input(d_input);
+    thrust::device_ptr<int> output(d_output);
 
-    cub::DeviceTransform::Transform(d_temp_storage, temp_storage_bytes, d_input, d_output, PixelModificator(), num_items);
-    cudaMalloc(&d_temp_storage, temp_storage_bytes);
-    cub::DeviceTransform::Transform(d_temp_storage, temp_storage_bytes, d_input, d_output, PixelModificator(), num_items);
+    thrust::counting_iterator<int> indices(0);
 
-    cudaFree(d_temp_storage);
+    PixelModificator pixel_mod;
+
+    thrust::transform(input, input + size, indices, output, pixel_mod);
 }

@@ -3,30 +3,36 @@
 #include <cub/cub.cuh>
 
 
-struct is_positive
+struct DifferentThan
 {
-    __host__ __device__
-    bool operator()(const int& x) const
-    {
-        return x >= 0;
+    int compare;
+
+    CUB_RUNTIME_FUNCTION __forceinline__
+    DifferentThan(int compare) : compare(compare) {}
+
+    CUB_RUNTIME_FUNCTION __forceinline__
+    bool operator()(const int &a) const {
+        return (a != compare);
     }
 };
 
-
-void compact_scan(thrust::device_vector<int>& input, thrust::device_vector<int>& output)
+void compact_scan(int* d_input, int* d_output, const int size)
 {
-    int* d_input = thrust::raw_pointer_cast(input.data());
-    int* d_output = thrust::raw_pointer_cast(output.data());
+    void     *d_temp_storage = NULL;
+    size_t   temp_storage_bytes = 0;
+    int      *d_num_selected_out = nullptr;
 
-    void* d_temp_storage = nullptr;
-    size_t temp_storage_bytes = 0;
+    cudaMalloc(&d_num_selected_out, sizeof(int));
+    cudaMemset(d_num_selected_out, 0, sizeof(int));
 
-    int num_items = input.size();
-    int num_selected = 0;
+    DifferentThan select_op(-27);
 
-    cub::DeviceSelect::If(d_temp_storage, temp_storage_bytes, d_input, d_output, &num_selected, num_items, is_positive());
+    cub::DeviceSelect::If(d_temp_storage, temp_storage_bytes, d_input, d_output, d_num_selected_out, size, select_op);
+
     cudaMalloc(&d_temp_storage, temp_storage_bytes);
-    cub::DeviceSelect::If(d_temp_storage, temp_storage_bytes, d_input, d_output, &num_selected, num_items, is_positive());
+  
+    cub::DeviceSelect::If(d_temp_storage, temp_storage_bytes, d_input, d_output, d_num_selected_out, size, select_op);
 
     cudaFree(d_temp_storage);
+    cudaFree(d_num_selected_out);
 }
