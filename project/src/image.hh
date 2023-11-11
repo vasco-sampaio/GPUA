@@ -8,7 +8,6 @@
 #include <sstream>
 
 #include "config.h"
-#include "kernels/utils.h"
 
 struct Image
 {
@@ -46,7 +45,7 @@ struct Image
         {
             // TODO : Isn't there a better way to allocate the CPU Memory
             // To speed up the Host-to-Device Transfert ?
-            #if CPU
+            #if MODE == 0
                 buffer = (int*)malloc(width * height * sizeof(int));
             #else
                 cudaMallocHost(&buffer, width * height * sizeof(int));
@@ -77,7 +76,7 @@ struct Image
             }
             // TODO : Isn't there a better way to allocate the CPU Memory
             // To speed up the Host-to-Device Transfert ?
-            #if CPU
+            #if MODE == 0
                 buffer = (int*)malloc(image_size * sizeof(int));
             #else
                 cudaMallocHost(&buffer, image_size * sizeof(int));

@@ -5,6 +5,8 @@
 #include "kernels/histogram.cuh"
 #include "kernels/reduce.cuh"
 
+#include "utils.cuh"
+
 void fix_image_gpu(Image& image, cudaStream_t& stream) {
     const int image_size = image.width * image.height;
     const int buffer_size = image.size();

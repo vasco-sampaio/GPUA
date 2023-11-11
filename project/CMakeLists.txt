@@ -34,6 +34,7 @@ add_executable(main src/main.cu
                     src/fix_cpu.cu
                     src/fix_gpu.cu
                     src/fix_gpu_industrial.cu
+                    src/cuda_streams.cu
                     src/kernels/scan.cu
                     src/kernels/reduce.cu
                     src/kernels/histogram.cu

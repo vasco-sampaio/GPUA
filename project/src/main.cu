@@ -2,9 +2,11 @@
 #include "pipeline.hh"
 #include "fix_cpu.cuh"
 #include "fix_gpu_industrial.cuh"
+#include "fix_gpu.cuh"
+#include "cuda_streams.cuh"
+#include "utils.cuh"
 
 #include <cub/device/device_reduce.cuh>
-
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
 
@@ -46,6 +48,10 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
     std::cout << "Done, starting compute" << std::endl;
 
+    #if MODE == 1
+        initializeStreams();
+    #endif
+
     #pragma omp parallel for
     for (int i = 0; i < nb_images; ++i)
     {
@@ -59,6 +65,10 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
             fix_gpu_industrial(images[i]);
         #endif
     }
+
+    #if MODE == 1
+        cleanupStreams();
+    #endif
 
     std::cout << "Done with compute, starting stats" << std::endl;
 
@@ -78,19 +88,19 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
                 size_t   temp_storage_bytes = 0;
                 int      *d_out = nullptr;
 
-                cudaMalloc(&d_in, sizeof(int) * num_items);
-                cudaMalloc(&d_out, sizeof(int));
-                cudaMemcpy(d_in, images[i].buffer, sizeof(int) * num_items, cudaMemcpyHostToDevice);
+                CUDA_CALL(cudaMalloc(&d_in, sizeof(int) * num_items));
+                CUDA_CALL(cudaMalloc(&d_out, sizeof(int)));
+                CUDA_CALL(cudaMemcpy(d_in, images[i].buffer, sizeof(int) * num_items, cudaMemcpyHostToDevice));
 
                 cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items);
-                cudaMalloc(&d_temp_storage, temp_storage_bytes);
+                CUDA_CALL(cudaMalloc(&d_temp_storage, temp_storage_bytes));
                 cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items);
 
-                cudaMemcpy(&images[i].to_sort.total, d_out, sizeof(int), cudaMemcpyDeviceToHost);
+                CUDA_CALL(cudaMemcpy(&images[i].to_sort.total, d_out, sizeof(int), cudaMemcpyDeviceToHost));
 
-                cudaFree(d_temp_storage);
-                cudaFree(d_out);
-                cudaFree(d_in);
+                CUDA_CALL(cudaFree(d_temp_storage));
+                CUDA_CALL(cudaFree(d_out));
+                CUDA_CALL(cudaFree(d_in));
             #endif
         }
     #endif
