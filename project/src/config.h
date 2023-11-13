@@ -5,5 +5,5 @@
  */
 
 #ifndef MODE
-    #define MODE 0
+    #define MODE 1
 #endif /* !MODE */
